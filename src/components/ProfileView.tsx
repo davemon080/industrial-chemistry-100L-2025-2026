@@ -12,6 +12,7 @@ import {
   Calendar, 
   RefreshCcw, 
   Bell, 
+  BellOff, 
   Lock, 
   BookMarked, 
   ShieldAlert,
@@ -113,6 +114,8 @@ interface ProfileViewProps {
   subscriptionDetails: any;
   onUpdateSubStatus: () => void;
   onChangeTab: (tab: any) => void;
+  deferredPrompt?: any;
+  onClearDeferredPrompt?: () => void;
 }
 
 export default function ProfileView({ 
@@ -123,7 +126,9 @@ export default function ProfileView({
   subStatus,
   subscriptionDetails,
   onUpdateSubStatus,
-  onChangeTab
+  onChangeTab,
+  deferredPrompt,
+  onClearDeferredPrompt
 }: ProfileViewProps) {
   const isRep = user.matricNumber === DEFAULT_COURSE_REP_MATRIC;
 
@@ -151,6 +156,7 @@ export default function ProfileView({
   const [isIframe, setIsIframe] = useState<boolean>(false);
   const [isIOS, setIsIOS] = useState<boolean>(false);
   const [isPWA, setIsPWA] = useState<boolean>(false);
+  const [isPushSubscribed, setIsPushSubscribed] = useState<boolean>(false);
   const [notificationToggleExpanded, setNotificationToggleExpanded] = useState<boolean>(false);
 
   useEffect(() => {
@@ -173,6 +179,19 @@ export default function ProfileView({
       setIsIframe(window.self !== window.top);
     } catch (e) {
       setIsIframe(true);
+    }
+
+    // Check active service worker push subscription
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.pushManager.getSubscription().then((sub) => {
+          setIsPushSubscribed(!!sub);
+        }).catch((err) => {
+          console.warn('[ProfileView] Could not fetch current push subscription status:', err);
+        });
+      }).catch((e) => {
+        console.warn('[ProfileView] SW ready failed for sub check:', e);
+      });
     }
   }, []);
 
@@ -219,6 +238,7 @@ export default function ProfileView({
                       matricNumber: user?.matricNumber || 'Guest'
                     })
                   });
+                  setIsPushSubscribed(true);
                   console.log('[WebPush] Registered and saved to Firestore push subscriptions.');
                 }
               } catch (pushErr) {
@@ -246,8 +266,47 @@ export default function ProfileView({
     }
   };
 
+  const handleDisableNotifications = async () => {
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await sub.unsubscribe();
+          setIsPushSubscribed(false);
+          console.log('[WebPush] Unsubscribed active subscription.');
+        } else {
+          setIsPushSubscribed(false);
+        }
+        alert('Device alerts disabled successfully. You will no longer receive background popups unless you enable them again.');
+      } catch (err) {
+        console.error('[WebPush] Action to unsubscribe failed:', err);
+      }
+    } else {
+      setIsPushSubscribed(false);
+    }
+  };
+
   const handleOpenNewTab = () => {
     window.open(window.location.href, '_blank');
+  };
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    try {
+      deferredPrompt.prompt();
+      const choiceResult = await deferredPrompt.userChoice;
+      if (choiceResult.outcome === 'accepted') {
+        console.log('[PWA] Student accepted native Android install prompt.');
+      } else {
+        console.log('[PWA] Student dismissed native Android install prompt.');
+      }
+      if (onClearDeferredPrompt) {
+        onClearDeferredPrompt();
+      }
+    } catch (err) {
+      console.warn('[PWA] Native prompt execution failed:', err);
+    }
   };
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -626,6 +685,39 @@ export default function ProfileView({
           Settings & Preferences
         </h3>
 
+        {/* Android PWA Dynamic Native App Installer Banner */}
+        {deferredPrompt && (
+          <div className="p-4 rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/25 to-slate-900/40 space-y-3 shadow-[0_4px_24px_rgba(99,102,241,0.15)]">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-indigo-950/80 text-indigo-400 border border-indigo-550/20">
+                <Smartphone className="w-5 h-5 text-indigo-400 shrink-0" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-sans font-semibold text-slate-100">Install Standalone Android Web App 📲</h4>
+                <p className="text-xs text-slate-400 font-sans leading-normal">
+                  Install Chemistry 100L directly to your phone's Home Screen for deep locked-screen push alerts, instant response times, and true offline capability.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleInstallApp}
+                className="flex-1 py-2 px-4 rounded-xl text-xs font-bold text-slate-950 bg-white hover:bg-slate-100 transition-all font-sans cursor-pointer text-center border-none outline-none select-none shadow-[0_4px_12px_rgba(255,255,255,0.1)]"
+              >
+                Install App Now
+              </button>
+              <button
+                type="button"
+                onClick={() => onClearDeferredPrompt?.()}
+                className="px-3.5 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 bg-slate-950 hover:bg-slate-900 transition-all font-sans cursor-pointer text-center border-none outline-none select-none"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Device Popup Alerts Preferences Panel */}
         <div className="rounded-2xl border border-slate-850 bg-slate-900/40 overflow-hidden transition-all duration-300">
           <button
@@ -692,10 +784,17 @@ export default function ProfileView({
                       <p className="text-xs font-sans text-slate-400">Current Authorization Status</p>
                       <div className="flex items-center gap-1.5">
                         {permissionStatus === 'granted' ? (
-                          <div className="text-emerald-400 text-xs font-sans flex items-center gap-1.5 bg-emerald-950/20 border border-emerald-500/20 px-2.5 py-0.5 rounded">
-                            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                            <span>Active / Subscribed</span>
-                          </div>
+                          isPushSubscribed ? (
+                            <div className="text-emerald-400 text-xs font-sans flex items-center gap-1.5 bg-emerald-950/20 border border-emerald-500/20 px-2.5 py-0.5 rounded">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                              <span>Active / Subscribed</span>
+                            </div>
+                          ) : (
+                            <div className="text-amber-400 text-xs font-sans flex items-center gap-1.5 bg-amber-950/20 border border-amber-500/20 px-2.5 py-0.5 rounded">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                              <span>Muted / Switched Off</span>
+                            </div>
+                          )
                         ) : permissionStatus === 'denied' ? (
                           <div className="text-rose-400 text-xs font-sans flex items-center gap-1.5 bg-rose-950/25 border border-rose-500/20 px-2.5 py-0.5 rounded">
                             <ShieldAlert className="w-3.5 h-3.5 text-rose-500 shrink-0" />
@@ -708,7 +807,7 @@ export default function ProfileView({
                           </div>
                         ) : (
                           <div className="text-slate-400 text-xs font-sans flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded">
-                            <span className="w-1 h-1 rounded-full bg-slate-500" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
                             <span>Inactive</span>
                           </div>
                         )}
@@ -716,20 +815,37 @@ export default function ProfileView({
                     </div>
 
                     <div>
-                      {permissionStatus !== 'granted' && permissionStatus !== 'unsupported' && (
-                        <button
-                          onClick={handleRequestPermission}
-                          className="px-4 py-2 text-xs font-bold bg-white hover:bg-slate-100 text-slate-950 rounded-xl transition-all cursor-pointer border-none outline-none flex items-center gap-1"
-                        >
-                          <Bell className="w-3.5 h-3.5 text-indigo-600 animate-bounce" />
-                          <span>Enable Alerts</span>
-                        </button>
+                      {/* If notifications are supported, show toggle button */}
+                      {permissionStatus !== 'unsupported' && (
+                        permissionStatus !== 'granted' ? (
+                          <button
+                            onClick={handleRequestPermission}
+                            className="px-4 py-2 text-xs font-bold bg-white hover:bg-slate-100 text-slate-950 rounded-xl transition-all cursor-pointer border-none outline-none flex items-center gap-1"
+                          >
+                            <Bell className="w-3.5 h-3.5 text-indigo-600 animate-bounce" />
+                            <span>Enable Alerts</span>
+                          </button>
+                        ) : isPushSubscribed ? (
+                          <button
+                            onClick={handleDisableNotifications}
+                            className="px-4 py-2 text-xs font-bold bg-rose-950/60 hover:bg-rose-900/60 text-rose-200 border border-rose-800/40 rounded-xl transition-all cursor-pointer outline-none flex items-center gap-1"
+                          >
+                            <BellOff className="w-3.5 h-3.5 text-rose-400" />
+                            <span>Switch Off Alerts</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleRequestPermission}
+                            className="px-4 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all cursor-pointer border-none outline-none flex items-center gap-1"
+                          >
+                            <Bell className="w-3.5 h-3.5 text-white animate-pulse" />
+                            <span>Switch On Alerts</span>
+                          </button>
+                        )
                       )}
-                      {permissionStatus === 'granted' && (
-                        <span className="text-xs text-slate-500 font-sans italic">Popups are enabled</span>
-                      )}
+
                       {permissionStatus === 'denied' && (
-                        <span className="text-[10px] text-slate-500 font-sans max-w-[150px] block leading-normal">
+                        <span className="text-[10px] text-slate-500 font-sans max-w-[150px] block leading-normal mt-1.5">
                           Reset site permissions in your browser bar.
                         </span>
                       )}
@@ -737,7 +853,7 @@ export default function ProfileView({
                   </div>
 
                   <p className="text-[10px] font-sans text-slate-500 leading-normal">
-                    💡 No spam policy in place. You will only receive system notices created by course representatives when adding classes, broadcasts, assigned deadlines, or academic material PDFs.
+                    💡 No spam policy in place. You can safely switch notifications off and on as you like. You will only receive background or lockscreen announcements created by your Course Representative.
                   </p>
                 </div>
               )}

@@ -11,28 +11,34 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/logo.svg",
-      "type": "image/svg+xml",
+      "src": "/logo-192.png",
+      "type": "image/png",
       "sizes": "192x192",
       "purpose": "any"
     },
     {
-      "src": "/logo.svg",
-      "type": "image/svg+xml",
+      "src": "/logo-512.png",
+      "type": "image/png",
       "sizes": "512x512",
       "purpose": "any"
     },
     {
-      "src": "/logo.svg",
-      "type": "image/svg+xml",
+      "src": "/logo-192.png",
+      "type": "image/png",
       "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logo-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
       "purpose": "maskable"
     },
     {
       "src": "/logo.svg",
       "type": "image/svg+xml",
-      "sizes": "512x512",
-      "purpose": "maskable"
+      "sizes": "192x192 512x512",
+      "purpose": "any"
     }
   ]
 }

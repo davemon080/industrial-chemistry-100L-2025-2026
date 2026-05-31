@@ -101,6 +101,22 @@ export default function App() {
     }
   });
 
+  // Install capability matching
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      console.log('[PWA App] beforeinstallprompt caught & stored.');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
   // Timetable and announcements databases - dynamic fresh connection
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
@@ -1303,6 +1319,8 @@ export default function App() {
             subscriptionDetails={subscriptionDetails}
             onUpdateSubStatus={handleUpdateSubStatus}
             onChangeTab={setActiveTab}
+            deferredPrompt={deferredPrompt}
+            onClearDeferredPrompt={() => setDeferredPrompt(null)}
           />
         );
       case 'notifications' as any:
