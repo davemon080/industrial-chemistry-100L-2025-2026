@@ -16,7 +16,7 @@ import {
 } from './data/defaultData';
 
 import { db, cleanData, getSafeDocId } from './lib/firebase';
-import { collection, onSnapshot, doc, setDoc, deleteDoc, getDocs, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, getDocs, getDoc, collectionGroup, query } from 'firebase/firestore';
 
 // Custom subcomponents
 import GlassCard from './components/GlassCard';
@@ -776,6 +776,44 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // Listen to Firestore real-time updates for nested course PDF modules
+  useEffect(() => {
+    if (!currentUser) return;
+    let isInitial = true;
+    const q = query(collectionGroup(db, 'pdf-modules'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!isInitial) {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data() as any;
+            if (data.createdBy !== currentUser.matricNumber) {
+              const notif: NotificationItem = {
+                id: `notif-pdf-${Date.now()}-${change.doc.id}`,
+                type: 'announcement',
+                title: 'New PDF Handbook Uploaded 📚',
+                body: `Resource Available: "${data.title}" has been successfully distributed by the Course Rep. Tap to view.`,
+                time: 'Just now',
+                isRead: false,
+                priority: 'medium',
+                referenceTab: 'modules'
+              };
+              setNotifications((prev) => {
+                if (prev.some(p => p.id === notif.id)) return prev;
+                return [notif, ...prev];
+              });
+            }
+          }
+        });
+      }
+      isInitial = false;
+    }, (error) => {
+      console.warn('Firestore listening to collection group pdf-modules failed:', error);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     try {
       const stored = localStorage.getItem('ich100l_notifications');
@@ -833,7 +871,7 @@ export default function App() {
 
   const lastNotificationsCountRef = useRef(notifications.length);
 
-  // Sync to localStorage on updates and trigger native lockscreen popups
+  // Sync to localStorage on updates and trigger native lockscreen popups (compatible with standard browsers, Android, and iOS PWA)
   useEffect(() => {
     localStorage.setItem('ich100l_notifications', JSON.stringify(notifications));
 
@@ -842,15 +880,35 @@ export default function App() {
       const latestNotif = notifications[0];
       if (latestNotif && !latestNotif.isRead) {
         if ('Notification' in window && Notification.permission === 'granted') {
-          try {
-            new Notification(latestNotif.title, {
-              body: latestNotif.body,
-              icon: '/favicon.ico',
-              vibrate: [200, 100, 200],
-              tag: latestNotif.id
-            } as any);
-          } catch (e) {
-            console.error('Failed to trigger native lockscreen notification:', e);
+          const title = latestNotif.title;
+          const options = {
+            body: latestNotif.body,
+            icon: '/logo.svg',
+            badge: '/logo.svg',
+            vibrate: [200, 100, 200],
+            tag: latestNotif.id
+          };
+
+          // Try Service Worker showNotification first (iOS/PWA standard)
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready
+              .then((reg) => {
+                reg.showNotification(title, options);
+              })
+              .catch((err) => {
+                console.warn('SW notification failed in alert sync, falling back:', err);
+                try {
+                  new Notification(title, options);
+                } catch (e) {
+                  console.error('Core constructor fallback failed:', e);
+                }
+              });
+          } else {
+            try {
+              new Notification(title, options);
+            } catch (e) {
+              console.error('Core constructor direct launch failed:', e);
+            }
           }
         }
       }

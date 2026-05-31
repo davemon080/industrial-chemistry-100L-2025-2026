@@ -17,7 +17,7 @@ export interface NotificationItem {
   time: string; // e.g., "1 hour ago"
   isRead: boolean;
   priority: 'high' | 'medium' | 'info';
-  referenceTab: 'schedule' | 'deadlines' | 'announcements';
+  referenceTab: 'schedule' | 'deadlines' | 'announcements' | 'modules';
 }
 
 interface NotificationsPageProps {
@@ -25,7 +25,7 @@ interface NotificationsPageProps {
   announcements: Announcement[];
   activities: Activity[];
   onBack: () => void;
-  onNavigateToTab: (tab: 'schedule' | 'deadlines' | 'announcements') => void;
+  onNavigateToTab: (tab: 'schedule' | 'deadlines' | 'announcements' | 'modules') => void;
   notifications: NotificationItem[];
   onMarkAllAsRead: () => void;
   onToggleRead: (id: string) => void;

@@ -170,11 +170,35 @@ export default function ProfileView({
     try {
       const result = await Notification.requestPermission();
       setPermissionStatus(result);
+      
       if (result === 'granted') {
-        const notif = new Notification('Alerts Active! 🔔', {
+        const title = 'Alerts Active! 🔔';
+        const options = {
           body: 'Popup alerts are now set up. You will receive notifications of new schedules, broadcasts, and module uploads from the Course Rep!',
-          icon: '/favicon.ico'
-        });
+          icon: '/logo.svg',
+          badge: '/logo.svg'
+        };
+
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready
+            .then((reg) => {
+              reg.showNotification(title, options);
+            })
+            .catch((err) => {
+              console.warn('SW notification failed, falling back:', err);
+              try {
+                new Notification(title, options);
+              } catch (e) {
+                console.error('Standard constructor failed:', e);
+              }
+            });
+        } else {
+          try {
+            new Notification(title, options);
+          } catch (e) {
+            console.error('Standard constructor failed:', e);
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to request permission:', err);
