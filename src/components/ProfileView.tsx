@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   User, 
   LogOut, 
@@ -22,7 +22,9 @@ import {
   Loader2,
   CreditCard,
   Sparkles,
-  HelpCircle
+  HelpCircle,
+  Smartphone,
+  Share
 } from 'lucide-react';
 import GlassCard from './GlassCard';
 import { DEFAULT_COURSE_REP_MATRIC } from '../data/defaultData';
@@ -128,6 +130,60 @@ export default function ProfileView({
   const [profileCheckoutUrl, setProfileCheckoutUrl] = useState('');
   const [subPayError, setSubPayError] = useState('');
   const [subPaySuccess, setSubPaySuccess] = useState('');
+
+  // Notification capabilities checking & iOS alignment handler
+  const [permissionStatus, setPermissionStatus] = useState<string>('default');
+  const [isIframe, setIsIframe] = useState<boolean>(false);
+  const [isIOS, setIsIOS] = useState<boolean>(false);
+  const [isPWA, setIsPWA] = useState<boolean>(false);
+  const [notificationToggleExpanded, setNotificationToggleExpanded] = useState<boolean>(false);
+
+  useEffect(() => {
+    // Detect iOS
+    const userAgent = window.navigator.userAgent || window.navigator.vendor || (window as any).opera;
+    const iOSDetected = /iPad|iPhone|iPod/.test(userAgent) && !(window as any).MSStream;
+    setIsIOS(iOSDetected);
+
+    // Detect standalone PWA status
+    const standalonePWA = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+    setIsPWA(standalonePWA);
+
+    if (!('Notification' in window)) {
+      setPermissionStatus('unsupported');
+    } else {
+      setPermissionStatus(Notification.permission);
+    }
+
+    try {
+      setIsIframe(window.self !== window.top);
+    } catch (e) {
+      setIsIframe(true);
+    }
+  }, []);
+
+  const handleRequestPermission = async () => {
+    if (!('Notification' in window)) {
+      alert('Your browser or platform does not support browser-level notifications. On iOS/iPhone, please add this app to your Home Screen first!');
+      return;
+    }
+
+    try {
+      const result = await Notification.requestPermission();
+      setPermissionStatus(result);
+      if (result === 'granted') {
+        const notif = new Notification('Alerts Active! 🔔', {
+          body: 'Popup alerts are now set up. You will receive notifications of new schedules, broadcasts, and module uploads from the Course Rep!',
+          icon: '/favicon.ico'
+        });
+      }
+    } catch (err) {
+      console.error('Failed to request permission:', err);
+    }
+  };
+
+  const handleOpenNewTab = () => {
+    window.open(window.location.href, '_blank');
+  };
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -504,6 +560,125 @@ export default function ProfileView({
         <h3 className="text-xs font-mono text-slate-500 uppercase tracking-wider px-1">
           Settings & Preferences
         </h3>
+
+        {/* Device Popup Alerts Preferences Panel */}
+        <div className="rounded-2xl border border-slate-850 bg-slate-900/40 overflow-hidden transition-all duration-300">
+          <button
+            type="button"
+            onClick={() => setNotificationToggleExpanded(!notificationToggleExpanded)}
+            className="w-full p-4 hover:bg-slate-900/40 text-left flex items-center justify-between pointer-events-auto cursor-pointer outline-none group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-slate-950 text-indigo-400 group-hover:text-indigo-300 transition-colors">
+                <Bell className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-sm font-sans font-medium text-slate-200">Device Popup Notifications</p>
+                <p className="text-xs text-slate-500 font-sans">Toggle lockscreen notification alerts for assignments & announcements</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400 group-hover:text-white px-2.5 py-1 rounded bg-slate-950 text-center transition-colors">
+              {notificationToggleExpanded ? 'Hide' : 'Configure'}
+            </span>
+          </button>
+
+          {notificationToggleExpanded && (
+            <div className="p-4 border-t border-slate-900/60 bg-slate-950/20 space-y-4">
+              {/* If user is on an iOS device and not running as PWA (e.g., standard Safari tab) */}
+              {isIOS && !isPWA ? (
+                <div className="space-y-3.5">
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200 leading-relaxed font-sans flex items-start gap-2.5">
+                    <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-amber-300">iPhone/iPad Notification Requirement 📲</p>
+                      <p className="mt-1 text-[11px] leading-relaxed opacity-90">
+                        Apple iOS requires you to install or add websites to your Home Screen before it allows standard popup alerts. Follow these quick steps to get alerts:
+                      </p>
+                      <ol className="list-decimal list-inside mt-2 space-y-1 text-[11px] opacity-90 pl-1 font-sans">
+                        <li>Tap the <span className="inline-flex items-center bg-slate-900/60 px-1.5 py-0.5 rounded border border-slate-800"><Share className="w-3 h-3 text-slate-300 shrink-0 inline mr-1" /> Share</span> icon at the bottom or top of Safari.</li>
+                        <li>Scroll down and select <strong className="text-white">Add to Home Screen</strong>.</li>
+                        <li>Launch this app from your iPhone Home Screen icon.</li>
+                        <li>Navigate back to this Profile tab and enable your notifications seamlessly!</li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+              ) : isIframe ? (
+                <div className="space-y-3">
+                  <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-500/20 text-xs text-slate-300 flex items-start gap-2.5 leading-relaxed">
+                    <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-indigo-400" />
+                    <div>
+                      <strong className="text-indigo-300 block mb-0.5">Iframe Sandbox Limitation</strong>
+                      Instant device popups require the application to run within its native tab instead of an iframe layout wrapper.
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleOpenNewTab}
+                    className="w-full py-2.5 px-4 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:shadow-[0_4px_16px_rgba(99,102,241,0.35)] border-none outline-none"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    <span>Open in New Tab to Enable Alerts</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-950/60 border border-slate-900">
+                    <div className="space-y-1">
+                      <p className="text-xs font-sans text-slate-400">Current Authorization Status</p>
+                      <div className="flex items-center gap-1.5">
+                        {permissionStatus === 'granted' ? (
+                          <div className="text-emerald-400 text-xs font-sans flex items-center gap-1.5 bg-emerald-950/20 border border-emerald-500/20 px-2.5 py-0.5 rounded">
+                            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                            <span>Active / Subscribed</span>
+                          </div>
+                        ) : permissionStatus === 'denied' ? (
+                          <div className="text-rose-400 text-xs font-sans flex items-center gap-1.5 bg-rose-950/25 border border-rose-500/20 px-2.5 py-0.5 rounded">
+                            <ShieldAlert className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                            <span>Blocked by Browser Settings</span>
+                          </div>
+                        ) : permissionStatus === 'unsupported' ? (
+                          <div className="text-amber-400 text-xs font-sans flex items-center gap-1.5 bg-amber-950/25 border border-amber-500/20 px-2.5 py-0.5 rounded">
+                            <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                            <span>Platform Unsupported</span>
+                          </div>
+                        ) : (
+                          <div className="text-slate-400 text-xs font-sans flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded">
+                            <span className="w-1 h-1 rounded-full bg-slate-500" />
+                            <span>Inactive</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      {permissionStatus !== 'granted' && permissionStatus !== 'unsupported' && (
+                        <button
+                          onClick={handleRequestPermission}
+                          className="px-4 py-2 text-xs font-bold bg-white hover:bg-slate-100 text-slate-950 rounded-xl transition-all cursor-pointer border-none outline-none flex items-center gap-1"
+                        >
+                          <Bell className="w-3.5 h-3.5 text-indigo-600 animate-bounce" />
+                          <span>Enable Alerts</span>
+                        </button>
+                      )}
+                      {permissionStatus === 'granted' && (
+                        <span className="text-xs text-slate-500 font-sans italic">Popups are enabled</span>
+                      )}
+                      {permissionStatus === 'denied' && (
+                        <span className="text-[10px] text-slate-500 font-sans max-w-[150px] block leading-normal">
+                          Reset site permissions in your browser bar.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] font-sans text-slate-500 leading-normal">
+                    💡 No spam policy in place. You will only receive system notices created by course representatives when adding classes, broadcasts, assigned deadlines, or academic material PDFs.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Manage Course Subscription Panel */}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden transition-all duration-300">
