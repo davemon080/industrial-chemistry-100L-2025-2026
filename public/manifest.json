@@ -2,17 +2,37 @@
   "short_name": "ICH 100L",
   "name": "ICH 100L Class Board",
   "description": "Real-time schedules, deadlines, broadcasts, and PDF modules for Chemistry 100L. Complete offline-compatible portal.",
-  "icons": [
-    {
-      "src": "/logo.svg",
-      "type": "image/svg+xml",
-      "sizes": "192x192 512x512",
-      "purpose": "any maskable"
-    }
-  ],
+  "id": "/",
+  "scope": "/",
   "start_url": "/",
   "background_color": "#020617",
   "theme_color": "#4f46e5",
   "display": "standalone",
-  "orientation": "portrait"
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logo.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
 }

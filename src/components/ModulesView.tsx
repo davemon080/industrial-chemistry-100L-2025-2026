@@ -331,6 +331,21 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
 
       await setDoc(doc(db, 'courses', selectedCourse.id, 'pdf-modules', moduleId), cleanData(newModule));
 
+      // Trigger background push notification for new PDF
+      try {
+        await fetch('/api/send-broadcast-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: 'New PDF Handbook Uploaded 📚',
+            body: `Resource Available: "${titleClean}" has been successfully distributed by the Course Rep.`,
+            category: 'modules'
+          })
+        });
+      } catch (pushErr) {
+        console.warn('Failed to dispatch module push:', pushErr);
+      }
+
       // Reset fields
       setNewModTitle('');
       setNewModUrl('');

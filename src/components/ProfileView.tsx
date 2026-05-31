@@ -84,6 +84,21 @@ const saveUserToDB = (user: any) => {
   }
 };
 
+const urlBase64ToUint8Array = (base64String: string) => {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+};
+
 interface ProfileViewProps {
   user: { email: string; matricNumber: string; name: string; createdAt?: string };
   onLogout: () => void;
@@ -181,8 +196,34 @@ export default function ProfileView({
 
         if ('serviceWorker' in navigator) {
           navigator.serviceWorker.ready
-            .then((reg) => {
+            .then(async (reg) => {
               reg.showNotification(title, options);
+              
+              // Call background subscription setup
+              try {
+                const keyRes = await fetch('/api/vapid-public-key');
+                const keyData = await keyRes.json();
+                
+                if (keyData?.publicKey) {
+                  const applicationServerKey = urlBase64ToUint8Array(keyData.publicKey);
+                  const sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey
+                  });
+
+                  await fetch('/api/push-subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      subscription: sub,
+                      matricNumber: user?.matricNumber || 'Guest'
+                    })
+                  });
+                  console.log('[WebPush] Registered and saved to Firestore push subscriptions.');
+                }
+              } catch (pushErr) {
+                console.error('[WebPush] Registration failed:', pushErr);
+              }
             })
             .catch((err) => {
               console.warn('SW notification failed, falling back:', err);

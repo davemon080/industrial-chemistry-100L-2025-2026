@@ -44,6 +44,18 @@ function getMondayOfCurrentWeek(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+const triggerPushNotification = async (title: string, body: string, category: string) => {
+  try {
+    await fetch('/api/send-broadcast-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, body, category })
+    });
+  } catch (err) {
+    console.warn('Failed to trigger background push notification:', err);
+  }
+};
+
 function getMondayOfDateString(dateStr: string): string {
   if (!dateStr) return '';
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -1009,6 +1021,9 @@ export default function App() {
       referenceTab: 'schedule'
     };
     setNotifications((prev) => [notif, ...prev]);
+
+    // Async push alert
+    triggerPushNotification(notif.title, notif.body, 'schedule');
   };
 
   const handleUpdateActivity = async (id: string, updatedAct: Omit<Activity, 'id' | 'createdBy'>) => {
@@ -1081,6 +1096,9 @@ export default function App() {
       referenceTab: 'deadlines'
     };
     setNotifications((prev) => [notif, ...prev]);
+
+    // Async push alert
+    triggerPushNotification(notif.title, notif.body, 'deadlines');
   };
 
   const handleDeleteDeadline = async (id: string) => {
@@ -1124,6 +1142,9 @@ export default function App() {
       referenceTab: 'announcements'
     };
     setNotifications((prev) => [notif, ...prev]);
+
+    // Async push alert
+    triggerPushNotification(notif.title, notif.body, 'announcements');
   };
 
   const handleDeleteAnnouncement = async (id: string) => {

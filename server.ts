@@ -3,6 +3,67 @@ import path from "path";
 import fs from "fs";
 import multer from "multer";
 import { createServer as createViteServer } from "vite";
+import webpush from "web-push";
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } from "firebase/firestore";
+
+// Setup Firebase client instance on server matching firebase-applet-config
+let db: any = null;
+try {
+  const appletConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(appletConfigPath)) {
+    const appletConfig = JSON.parse(fs.readFileSync(appletConfigPath, "utf-8"));
+    const firebaseConfig = {
+      apiKey: appletConfig.apiKey || "AIzaSyDasXOCsqxwer5TJEkw8boKtnxk_KHCT0o",
+      authDomain: appletConfig.authDomain || "ich100l.firebaseapp.com",
+      projectId: appletConfig.projectId || "ich100l",
+      storageBucket: appletConfig.storageBucket || "ich100l.firebasestorage.app",
+      messagingSenderId: appletConfig.messagingSenderId || "957173852676",
+      appId: appletConfig.appId || "1:957173852676:web:c87374af6a8e02afefa351",
+      measurementId: appletConfig.measurementId || "G-X7T2126SDY"
+    };
+    const fbApp = initializeApp(firebaseConfig);
+    db = getFirestore(fbApp, appletConfig.firestoreDatabaseId);
+    console.log("[Server] Firebase Firestore offline-compatible client initialized successfully.");
+  } else {
+    console.warn("[Server] firebase-applet-config.json not found. Database features disabled on backend.");
+  }
+} catch (error) {
+  console.error("[Server] Firebase Firestore initialization failed:", error);
+}
+
+// Utility matching client-side
+function getSafeDocId(id: string): string {
+  if (!id) return "";
+  return id.trim().replace(/\//g, "-");
+}
+
+// Persist / load VAPID Keys dynamically so push subscription is not invalidated on restarts
+const vapidPath = path.join(process.cwd(), "vapid-keys.json");
+let vapidKeys: { publicKey: string; privateKey: string };
+
+if (fs.existsSync(vapidPath)) {
+  try {
+    vapidKeys = JSON.parse(fs.readFileSync(vapidPath, "utf-8"));
+  } catch (err) {
+    console.error("[Server] Failed to read existing VAPID keys, generating new ones...");
+    vapidKeys = webpush.generateVAPIDKeys();
+    fs.writeFileSync(vapidPath, JSON.stringify(vapidKeys), "utf-8");
+  }
+} else {
+  vapidKeys = webpush.generateVAPIDKeys();
+  try {
+    fs.writeFileSync(vapidPath, JSON.stringify(vapidKeys), "utf-8");
+  } catch (err) {
+    console.error("[Server] Failed to persist generated VAPID keys:", err);
+  }
+}
+
+webpush.setVapidDetails(
+  "mailto:daveimagodei@gmail.com",
+  vapidKeys.publicKey,
+  vapidKeys.privateKey
+);
 
 async function startServer() {
   const app = express();
@@ -76,6 +137,83 @@ async function startServer() {
 
   // Middleware for decoding incoming request bodies
   app.use(express.json());
+
+  // Web Push API: Serve the VAPID public key
+  app.get("/api/vapid-public-key", (req, res) => {
+    res.json({ publicKey: vapidKeys.publicKey });
+  });
+
+  // Web Push API: Save push subscription durably in Firestore
+  app.post("/api/push-subscribe", async (req, res) => {
+    const { subscription, matricNumber } = req.body;
+    if (!subscription) {
+      return res.status(400).json({ error: "Subscription payload is required." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Backend database connection is offline. Please try again." });
+    }
+
+    try {
+      const docId = getSafeDocId(matricNumber || `anon-${Date.now()}`);
+      await setDoc(doc(db, "push-subscriptions", docId), {
+        subscription,
+        matricNumber: matricNumber || "Guest",
+        createdAt: new Date().toISOString()
+      });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Server] Subscribe persistence error:", error);
+      res.status(500).json({ error: error.message || "Could not save push subscription." });
+    }
+  });
+
+  // Web Push API: Broadcast offline background notification alert
+  app.post("/api/send-broadcast-push", async (req, res) => {
+    const { title, body, category } = req.body;
+    if (!title || !body) {
+      return res.status(400).json({ error: "Title and body parameters are required for broadcasting alerts." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Backend database connection is offline. Notification bypass initiated." });
+    }
+
+    try {
+      const snap = await getDocs(collection(db, "push-subscriptions"));
+      if (snap.empty) {
+        return res.json({ success: true, count: 0, message: "No active push notifications configured." });
+      }
+
+      const payload = JSON.stringify({ title, body, category });
+      const sendPromises = snap.docs.map(async (docSnap) => {
+        const data = docSnap.data();
+        if (!data.subscription) return;
+
+        try {
+          await webpush.sendNotification(data.subscription, payload);
+        } catch (error: any) {
+          // Check for expired or inactive registrations (Status 410 or 404)
+          if (error.statusCode === 410 || error.statusCode === 404) {
+            console.log(`[WebPush] Pruning expired subscription for ID ${docSnap.id}`);
+            try {
+              await deleteDoc(doc(db, "push-subscriptions", docSnap.id));
+            } catch (pruningError) {
+              console.error("[WebPush] Failed to prune subscription:", pruningError);
+            }
+          } else {
+            console.error(`[WebPush] Push execution failed for subscription ID: ${docSnap.id}`, error);
+          }
+        }
+      });
+
+      await Promise.all(sendPromises);
+      res.json({ success: true, count: snap.size });
+    } catch (err: any) {
+      console.error("[Server] Broadcast WebPush system dispatch failed:", err);
+      res.status(500).json({ error: err.message || "Failed to trigger PWA background alerts." });
+    }
+  });
 
   // API route to securely verify Paystack transactions
   app.post("/api/paystack-verify", async (req, res) => {
