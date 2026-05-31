@@ -80,23 +80,46 @@ export default function App() {
     setLogoUploadError('');
     setIsUploadingLogo(true);
 
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoUploadError('Logo image is too large (max 2MB allowed).');
+      setIsUploadingLogo(false);
+      return;
+    }
+
     const formData = new FormData();
     formData.append('logo', file);
 
     try {
-      const resp = await fetch('/api/upload-logo', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await resp.json();
-      if (resp.ok && data.success) {
-        setLogoInput(data.url);
-        await setDoc(doc(db, 'system-config', 'app-branding'), { logoUrl: data.url }, { merge: true });
-        setLogoUrl(data.url);
-        setIsEditingLogo(false);
-      } else {
-        setLogoUploadError(data.error || 'Failed to upload logo.');
+      let finalUrl = '';
+      try {
+        const resp = await fetch('/api/upload-logo', {
+          method: 'POST',
+          body: formData,
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.success) {
+            finalUrl = data.url;
+          }
+        }
+      } catch (err) {
+        console.warn('Backend API logo upload failed, switching to serverless Base64 storage:', err);
       }
+
+      if (!finalUrl) {
+        // Fallback for Vercel: Read in-browser as Base64 data URI
+        finalUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(file);
+        });
+      }
+
+      setLogoInput(finalUrl);
+      await setDoc(doc(db, 'system-config', 'app-branding'), { logoUrl: finalUrl }, { merge: true });
+      setLogoUrl(finalUrl);
+      setIsEditingLogo(false);
     } catch (err) {
       console.error('Logo upload error:', err);
       setLogoUploadError('Upload failed. Please try again.');

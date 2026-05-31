@@ -35,7 +35,12 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCw,
-  RefreshCw
+  RefreshCw,
+  Maximize2,
+  Minimize2,
+  X,
+  Menu,
+  Columns
 } from 'lucide-react';
 import GlassCard from './GlassCard';
 import { motion, AnimatePresence } from 'motion/react';
@@ -56,11 +61,51 @@ export interface PdfModule {
   description?: string;
   uploadedAt: string;
   createdBy: string;
+  fileSize?: string;
 }
 
 interface ModulesViewProps {
   isCourseRep: boolean;
   userMatric: string;
+}
+
+// Automatically convert common file hosting sharing links (like Google Drive, Dropbox) to direct raw PDF download endpoints
+export function cleanUrlToDirectDownload(url: string): string {
+  if (!url) return '';
+  let clean = url.trim();
+
+  // 1. Google Drive Sharing Link
+  // Supports formats: https://drive.google.com/file/d/FILE_ID/view?usp=sharing, /preview, /edit, etc.
+  // Supports open?id=FILE_ID
+  const googleDriveMatch = clean.match(/https?:\/\/(?:drive|docs)\.google\.com\/(?:file\/d\/|open\?id=)([^/?#\s&]+)/);
+  if (googleDriveMatch && googleDriveMatch[1]) {
+    const fileId = googleDriveMatch[1];
+    return `https://docs.google.com/uc?export=download&id=${fileId}`;
+  }
+
+  // 2. Dropbox Sharing Link
+  // Supports converting standard sharing links to direct raw download links via dl.dropboxusercontent.com
+  if (clean.includes('dropbox.com')) {
+    let direct = clean;
+    direct = direct.replace('//www.dropbox.com', '//dl.dropboxusercontent.com');
+    direct = direct.replace('//dropbox.com', '//dl.dropboxusercontent.com');
+    if (direct.includes('?')) {
+      if (!direct.includes('dl=1')) {
+        direct = direct.replace(/dl=[0-9]/, 'dl=1');
+      }
+    } else {
+      direct += '?dl=1';
+    }
+    return direct;
+  }
+
+  // 3. OneDrive
+  // If sharing with redir?, we change redir to download
+  if (clean.includes('onedrive.live.com') && clean.includes('redir')) {
+    return clean.replace('redir', 'download');
+  }
+
+  return clean;
 }
 
 export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProps) {
@@ -78,155 +123,15 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
   const [isAddingCourse, setIsAddingCourse] = useState(false);
   const [isAddingModule, setIsAddingModule] = useState(false);
 
+  // Custom Delete Confirmations & Fallbacks
+  const [deleteConfirmModId, setDeleteConfirmModId] = useState<string | null>(null);
+  const [deleteConfirmCourseId, setDeleteConfirmCourseId] = useState<string | null>(null);
+  const [fallbackIndicator, setFallbackIndicator] = useState<string>('');
+
+
+
   // Source tab choice for creating a PDF ('file' vs 'url')
   const [addModuleSource, setAddModuleSource] = useState<'file' | 'url'>('file');
-
-  // Inbuilt PDF Viewer State
-  const [viewedPdf, setViewedPdf] = useState<PdfModule | null>(null);
-  const [pdfjsLoaded, setPdfjsLoaded] = useState(false);
-  const [numPages, setNumPages] = useState<number | null>(null);
-  const [pageNumber, setPageNumber] = useState<number>(1);
-  const [scale, setScale] = useState<number>(1.2);
-  const [pdfDoc, setPdfDoc] = useState<any>(null);
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [pdfRenderError, setPdfRenderError] = useState('');
-  const [rotation, setRotation] = useState<number>(0);
-
-  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
-  const renderTaskRef = React.useRef<any>(null);
-
-  // Dynamically load PDF.js from a CDN
-  useEffect(() => {
-    if ((window as any).pdfjsLib) {
-      setPdfjsLoaded(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
-    script.async = true;
-    script.onload = () => {
-      const globalPdfjs = (window as any).pdfjsLib;
-      if (globalPdfjs) {
-        globalPdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-        setPdfjsLoaded(true);
-      }
-    };
-    script.onerror = () => {
-      setPdfRenderError('Failed to load in-app PDF rendering engine. Please verify internet access.');
-    };
-    document.body.appendChild(script);
-  }, []);
-
-  // PDF Document Loader
-  useEffect(() => {
-    if (!viewedPdf) {
-      setPdfDoc(null);
-      setNumPages(null);
-      setPageNumber(1);
-      setRotation(0);
-      setScale(1.2);
-      setPdfRenderError('');
-      return;
-    }
-
-    if (!pdfjsLoaded) return;
-
-    let isCancelled = false;
-    const loadPdfDoc = async () => {
-      setPdfLoading(true);
-      setPdfRenderError('');
-      setNumPages(null);
-      setPageNumber(1);
-
-      try {
-        const globalPdfjs = (window as any).pdfjsLib;
-        if (!globalPdfjs) {
-          throw new Error('PDF Engine is not loaded.');
-        }
-
-        const loadingTask = globalPdfjs.getDocument({
-          url: viewedPdf.pdfUrl,
-          withCredentials: false
-        });
-        
-        const pdf = await loadingTask.promise;
-        
-        if (isCancelled) return;
-        setPdfDoc(pdf);
-        setNumPages(pdf.numPages);
-      } catch (err: any) {
-        console.error('PDF.js download error:', err);
-        if (isCancelled) return;
-        setPdfRenderError(
-          'Could not render PDF in-app dynamically. This might occur due to cross-origin resource rules (CORS) on remote links, or server sandbox boundaries.'
-        );
-      } finally {
-        if (!isCancelled) {
-          setPdfLoading(false);
-        }
-      }
-    };
-
-    loadPdfDoc();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [viewedPdf, pdfjsLoaded]);
-
-  // Canvas Render Engine helper
-  useEffect(() => {
-    if (!pdfDoc || !canvasRef.current) return;
-
-    let isCancelled = false;
-    const renderPage = async () => {
-      try {
-        if (renderTaskRef.current) {
-          renderTaskRef.current.cancel();
-        }
-
-        const page = await pdfDoc.getPage(pageNumber);
-        if (isCancelled) return;
-
-        const viewport = page.getViewport({ scale, rotation });
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const context = canvas.getContext('2d');
-        if (!context) return;
-
-        // Support high DPI screens
-        const dpr = window.devicePixelRatio || 1;
-        canvas.height = viewport.height * dpr;
-        canvas.width = viewport.width * dpr;
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-
-        context.scale(dpr, dpr);
-
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport,
-        };
-
-        const renderTask = page.render(renderContext);
-        renderTaskRef.current = renderTask;
-
-        await renderTask.promise;
-        renderTaskRef.current = null;
-      } catch (err: any) {
-        if (err.name !== 'RenderingCancelledException') {
-          console.error('Canvas draw error:', err);
-        }
-      }
-    };
-
-    renderPage();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [pdfDoc, pageNumber, scale, rotation]);
 
   // New Course Inputs
   const [newCode, setNewCode] = useState('');
@@ -238,6 +143,7 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
   const [newModTitle, setNewModTitle] = useState('');
   const [newModUrl, setNewModUrl] = useState('');
   const [newModDesc, setNewModDesc] = useState('');
+  const [newModSize, setNewModSize] = useState('');
   const [moduleError, setModuleError] = useState('');
 
   // Local PDF Device Upload State
@@ -326,20 +232,10 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
   };
 
   // 4. Handle Delete Course
-  const handleDeleteCourse = async (courseId: string, event: React.MouseEvent) => {
+  const handleDeleteCourse = (courseId: string, event: React.MouseEvent) => {
     event.stopPropagation();
-    if (!confirm('Are you absolutely certain you want to delete this course and all its uploaded PDF resource syllabus notes?')) {
-      return;
-    }
-
-    try {
-      await deleteDoc(doc(db, 'courses', courseId));
-      if (selectedCourse?.id === courseId) {
-        setSelectedCourse(null);
-      }
-    } catch (err) {
-      console.error('Delete course error:', err);
-    }
+    if (!isCourseRep) return;
+    setDeleteConfirmCourseId(courseId);
   };
 
   // 5. PDF File Selection Change (with 100MB constraint)
@@ -356,6 +252,13 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
       setIsUploadingPdf(false);
       return;
     }
+
+    // Capture and format file size
+    const sizeInBytes = file.size;
+    const formattedSize = sizeInBytes > 1024 * 1024 
+      ? `${(sizeInBytes / (1024 * 1024)).toFixed(1)} MB` 
+      : `${(sizeInBytes / 1024).toFixed(0)} KB`;
+    setNewModSize(formattedSize);
 
     // Append standard form body
     const formData = new FormData();
@@ -374,11 +277,20 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
           setNewModTitle(rawName);
         }
       } else {
-        setPdfUploadError(data.error || 'Failed to upload syllabus PDF to server.');
+        // Fallback or detailed error message for serverless environments
+        let errorMsg = data.error || 'Failed to upload syllabus PDF to server.';
+        if (file.size > 4.5 * 1024 * 1024 && window.location.hostname.includes('vercel')) {
+          errorMsg = 'This Vercel serverless environment limits API dynamic uploads to 4.5MB. For files larger than 4.5MB, please use the "Provide Web URL" tab to easily paste any Google Drive, OneDrive, or Dropbox link, which fully bypasses hosting constraints up to 100MB!';
+        }
+        setPdfUploadError(errorMsg);
       }
     } catch (err) {
       console.error('Syllabus PDF file upload process failed: ', err);
-      setPdfUploadError('Upload pipeline failure. Please retry.');
+      let errorMsg = 'Upload pipeline failure. Please retry.';
+      if (file.size > 4.5 * 1024 * 1024) {
+        errorMsg = 'Upload failed because serverless API routers (like Vercel) limit total direct body sizes to 4.5MB. For sizes up to 100MB, please upload to Google Drive or Dropbox and paste the link in the "Provide Web URL" tab!';
+      }
+      setPdfUploadError(errorMsg);
     } finally {
       setIsUploadingPdf(false);
     }
@@ -392,9 +304,9 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
     if (!selectedCourse) return;
 
     const titleClean = newModTitle.trim();
-    const urlClean = newModUrl.trim();
+    const urlClean = cleanUrlToDirectDownload(newModUrl);
     
-    if (!titleClean || !urlClean) {
+    if (!titleClean || !newModUrl.trim()) {
       setModuleError('Syllabus Title and a valid PDF link or file upload is required.');
       return;
     }
@@ -413,7 +325,8 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
         pdfUrl: urlClean,
         description: newModDesc.trim() || undefined,
         uploadedAt: new Date().toISOString(),
-        createdBy: userMatric
+        createdBy: userMatric,
+        fileSize: newModSize || 'Direct Link'
       };
 
       await setDoc(doc(db, 'courses', selectedCourse.id, 'pdf-modules', moduleId), cleanData(newModule));
@@ -422,6 +335,7 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
       setNewModTitle('');
       setNewModUrl('');
       setNewModDesc('');
+      setNewModSize('');
       setIsAddingModule(false);
     } catch (err) {
       console.error('Save module error:', err);
@@ -430,17 +344,9 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
   };
 
   // 7. Handle Delete PDF Module
-  const handleDeleteModule = async (moduleId: string) => {
-    if (!selectedCourse) return;
-    if (!confirm('Remove this syllabus notes PDF module from the cloud directory?')) {
-      return;
-    }
-
-    try {
-      await deleteDoc(doc(db, 'courses', selectedCourse.id, 'pdf-modules', moduleId));
-    } catch (err) {
-      console.error('Delete module error:', err);
-    }
+  const handleDeleteModule = (moduleId: string) => {
+    if (!selectedCourse || !isCourseRep) return;
+    setDeleteConfirmModId(moduleId);
   };
 
   // Filter courses by searchable query
@@ -653,10 +559,13 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
                     </div>
                     
                     <div className="space-y-1 min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center justify-between gap-1.5">
                         <h4 className="text-xs font-display font-bold text-slate-200 truncate pr-2">
                           {mod.title}
                         </h4>
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[8px] font-mono font-bold text-amber-400 shrink-0 animate-pulse-slow" title="PDF direct catalog size">
+                          {mod.fileSize || 'Est. 1.2 MB'}
+                        </span>
                       </div>
                       
                       {mod.description && (
@@ -682,15 +591,17 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
                         </button>
                       )}
                       
-                      {/* INBUILT VIEWER BUTTON */}
-                      <button
-                        onClick={() => setViewedPdf(mod)}
-                        className="p-1.5 bg-indigo-500/10 hover:bg-indigo-505/25 border border-indigo-500/20 rounded-lg text-indigo-400 transition-all flex items-center justify-center cursor-pointer pointer-events-auto"
-                        title="View PDF In-app"
+                      {/* FILE VIEWER LINK (EXTERNAL WEB VIEWER, NEW TAB) */}
+                      <a
+                        href={cleanUrlToDirectDownload(mod.pdfUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/25 border border-indigo-500/20 rounded-lg text-indigo-400 transition-all flex items-center justify-center cursor-pointer pointer-events-auto outline-none"
+                        title="View PDF in a new browser tab"
                         id={`view-pdf-btn-${mod.id}`}
                       >
                         <Eye className="w-3.5 h-3.5" />
-                      </button>
+                      </a>
 
                       {/* DOWNLOAD BUTTON */}
                       <a
@@ -925,155 +836,89 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
         </div>
       )}
 
-      {/* ----------------- INBUILT PDF INTERACTIVE VIEWER PANEL ----------------- */}
-      {viewedPdf && (
-        <div className="fixed inset-0 bg-slate-950/98 z-[9999] flex flex-col h-full animate-fadeIn" id="inbuilt-pdf-viewer">
-          {/* Header Controls */}
-          <div className="flex items-center justify-between p-3 border-b border-slate-850 bg-slate-900 shadow-md shrink-0">
-            <div className="flex items-center gap-3 text-left min-w-0 flex-1">
-              <button
-                onClick={() => setViewedPdf(null)}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-705 text-slate-300 transition-colors cursor-pointer outline-none shrink-0"
-                title="Return to Syllabus Folder"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <div className="min-w-0">
-                <h3 className="text-xs font-display font-extrabold text-slate-100 line-clamp-1">{viewedPdf.title}</h3>
-                <span className="text-[9px] font-mono text-indigo-400 uppercase tracking-widest font-black block">INBUILT SYLLABUS DIRECT READER</span>
-              </div>
+
+
+      {/* ----------------- CUSTOM DELETE MODULE CONFIRMATION MODAL ----------------- */}
+      {deleteConfirmModId && (
+        <div className="fixed inset-0 bg-slate-950/80 z-[100000] flex items-center justify-center p-4 backdrop-blur-md">
+          <div className="p-6 rounded-2xl bg-slate-900 border border-slate-850 space-y-4 max-w-md w-full shadow-2xl text-left font-sans">
+            <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3 text-red-500">
+              <Trash2 className="w-5 h-5 animate-pulse" />
+              <h3 className="text-sm font-display font-extrabold text-slate-100">Confirm Document Deletion</h3>
             </div>
+            
+            <p className="text-xs text-slate-350 leading-relaxed font-sans mt-1">
+              Are you sure you want to permanently delete this syllabus document resource? This action cannot be undone and will remove the file from everyone's class board device list.
+            </p>
 
-            {/* Inbuilt Control Tools */}
-            {pdfDoc && (
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-slate-950/60 rounded-xl border border-slate-800 shrink-0">
-                <button
-                  onClick={() => setPageNumber(p => Math.max(1, p - 1))}
-                  disabled={pageNumber <= 1}
-                  className="p-1 text-slate-400 hover:text-slate-100 disabled:opacity-30 cursor-pointer transition-colors"
-                  title="Previous Page"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <span className="text-[10px] font-mono text-slate-300">
-                  Page {pageNumber} of {numPages}
-                </span>
-                <button
-                  onClick={() => setPageNumber(p => Math.min(numPages || 1, p + 1))}
-                  disabled={pageNumber >= (numPages || 1)}
-                  className="p-1 text-slate-400 hover:text-slate-100 disabled:opacity-30 cursor-pointer transition-colors"
-                  title="Next Page"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-                <span className="w-px h-3 bg-slate-800 mx-1" />
-                <button
-                  onClick={() => setScale(s => Math.max(0.6, s - 0.2))}
-                  className="p-1 text-slate-400 hover:text-slate-100 cursor-pointer transition-colors"
-                  title="Zoom Out"
-                >
-                  <ZoomOut className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setScale(s => Math.min(2.5, s + 0.2))}
-                  className="p-1 text-slate-400 hover:text-slate-100 cursor-pointer transition-colors"
-                  title="Zoom In"
-                >
-                  <ZoomIn className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setRotation(r => (r + 90) % 360)}
-                  className="p-1 text-slate-400 hover:text-slate-100 cursor-pointer transition-colors"
-                  title="Rotate Document Clockwise"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            <div className="flex items-center gap-1.5 shrink-0 ml-2">
-              <a
-                href={viewedPdf.pdfUrl}
-                download={`${viewedPdf.title}.pdf`}
-                className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-[10px] font-bold text-white transition-colors cursor-pointer"
-                title="Download document to local storage"
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmModId(null)}
+                className="flex-1 py-2 bg-slate-800 hover:bg-slate-750 border border-slate-800 rounded-xl text-xs font-bold text-slate-300 transition-colors cursor-pointer outline-none text-center"
               >
-                <Download className="w-3 h-3" />
-                <span>Save Note</span>
-              </a>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await deleteDoc(doc(db, 'courses', selectedCourse!.id, 'pdf-modules', deleteConfirmModId));
+                  } catch (err) {
+                    console.error('Delete module error:', err);
+                  } finally {
+                    setDeleteConfirmModId(null);
+                  }
+                }}
+                className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 rounded-xl text-xs font-bold text-white transition-colors cursor-pointer outline-none text-center shadow-md shadow-rose-600/10"
+              >
+                Delete Permanently
+              </button>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Core Interactive Reader View */}
-          <div className="flex-1 w-full bg-slate-950 overflow-auto flex flex-col items-center p-4 relative no-scrollbar">
-            {pdfLoading && (
-              <div className="absolute inset-0 bg-slate-950/80 z-20 flex flex-col items-center justify-center p-4">
-                <Loader2 className="w-8 h-8 animate-spin text-indigo-400 mb-2.5" />
-                <p className="text-xs font-display font-medium text-slate-200">Processing vector elements...</p>
-                <p className="text-[10px] text-slate-500 font-sans mt-1">Drawing document pages in high-resolution canvas...</p>
-              </div>
-            )}
+      {/* ----------------- CUSTOM DELETE COURSE CONFIRMATION MODAL ----------------- */}
+      {deleteConfirmCourseId && (
+        <div className="fixed inset-0 bg-slate-950/80 z-[100000] flex items-center justify-center p-4 backdrop-blur-md">
+          <div className="p-6 rounded-2xl bg-slate-900 border border-slate-850 space-y-4 max-w-md w-full shadow-2xl text-left font-sans">
+            <div className="flex items-center gap-2.5 border-b border-slate-800 pb-3 text-red-500">
+              <Trash2 className="w-5 h-5 animate-pulse" />
+              <h3 className="text-sm font-display font-extrabold text-slate-100">Confirm Course Folder Deletion</h3>
+            </div>
+            
+            <p className="text-xs text-slate-355 leading-relaxed font-sans mt-1">
+              Are you absolutely certain you want to delete this course folder and all its uploaded PDF resource syllabus notes? This action is permanent and cannot be undone.
+            </p>
 
-            {pdfRenderError ? (
-              <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-6 rounded-2xl text-center space-y-4 my-auto">
-                <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400 inline-block">
-                  <ShieldCheck className="w-6 h-6" />
-                </div>
-                <h4 className="text-sm font-display font-bold text-slate-100">CORS / Secure Link Policy Safeguard</h4>
-                <p className="text-xs text-slate-400 font-sans leading-relaxed">
-                  To ensure complete viewing offline or handling strict browser privacy rules, you can read the document beautifully using standard fallbacks below.
-                </p>
-                <div className="flex flex-col gap-2 pt-2">
-                  <a
-                    href={viewedPdf.pdfUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-505 rounded-xl text-xs font-bold text-white transition-all inline-block cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open in New Browser Tab</span>
-                  </a>
-                  <a
-                    href={viewedPdf.pdfUrl}
-                    download={`${viewedPdf.title}.pdf`}
-                    className="w-full py-2 bg-slate-805 hover:bg-slate-700 rounded-xl text-xs font-bold text-slate-300 transition-all inline-block cursor-pointer flex items-center justify-center gap-1.5"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download file to local device</span>
-                  </a>
-                </div>
-              </div>
-            ) : (
-              /* Canvas Drawing Target */
-              <div className="flex-1 flex flex-col items-center justify-start py-4">
-                <div className="bg-slate-900 p-2.5 rounded-2xl border border-slate-800/80 shadow-2xl flex items-center justify-center overflow-auto max-w-full">
-                  <canvas ref={canvasRef} className="shadow-lg max-w-full rounded-lg bg-white" />
-                </div>
-
-                {/* Mobile Extra Navigation Overlay */}
-                {pdfDoc && (
-                  <div className="flex sm:hidden items-center justify-center gap-3 mt-4 bg-slate-900 border border-slate-800 px-4 py-2.5 rounded-xl">
-                    <button
-                      onClick={() => setPageNumber(p => Math.max(1, p - 1))}
-                      disabled={pageNumber <= 1}
-                      className="p-1 text-slate-400 hover:text-slate-100 disabled:opacity-30 cursor-pointer"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <span className="text-[10px] font-mono text-slate-300">
-                      Page {pageNumber} of {numPages}
-                    </span>
-                    <button
-                      onClick={() => setPageNumber(p => Math.min(numPages || 1, p + 1))}
-                      disabled={pageNumber >= (numPages || 1)}
-                      className="p-1 text-slate-400 hover:text-slate-100 disabled:opacity-30 cursor-pointer"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmCourseId(null)}
+                className="flex-1 py-2 bg-slate-800 hover:bg-slate-755 border border-slate-800 rounded-xl text-xs font-bold text-slate-305 transition-colors cursor-pointer outline-none text-center"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await deleteDoc(doc(db, 'courses', deleteConfirmCourseId));
+                    if (selectedCourse?.id === deleteConfirmCourseId) {
+                      setSelectedCourse(null);
+                    }
+                  } catch (err) {
+                    console.error('Delete course error:', err);
+                  } finally {
+                    setDeleteConfirmCourseId(null);
+                  }
+                }}
+                className="flex-1 py-2 bg-rose-600 hover:bg-rose-503 rounded-xl text-xs font-bold text-white transition-colors cursor-pointer outline-none text-center shadow-md shadow-rose-600/10"
+              >
+                Delete Folder
+              </button>
+            </div>
           </div>
         </div>
       )}
