@@ -8,6 +8,7 @@ export interface User {
   matricNumber: string;
   name: string;
   isAdmin?: boolean;
+  createdAt?: string;
 }
 
 export type DayOfWeek = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
@@ -27,6 +28,7 @@ export interface Activity {
   createdBy: string; // Matric number of creator
   deliveryType?: 'physical' | 'online';
   classLink?: string;
+  date?: string; // e.g. "2026-06-03" (YYYY-MM-DD format)
 }
 
 export interface Deadline {

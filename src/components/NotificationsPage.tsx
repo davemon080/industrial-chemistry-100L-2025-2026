@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowLeft, Bell, Clock, Megaphone, Trash2, Check, ShieldAlert, Sparkles, Inbox } from 'lucide-react';
+import { ArrowLeft, Bell, Clock, Megaphone, Trash2, Check, ShieldAlert, Sparkles, Inbox, Smartphone, BellRing } from 'lucide-react';
 import { Deadline, Announcement, Activity } from '../types';
 import GlassCard from './GlassCard';
 
@@ -45,6 +46,62 @@ export default function NotificationsPage({
   
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
+  const [permissionStatus, setPermissionStatus] = useState<string>('default');
+  const [isIframe, setIsIframe] = useState<boolean>(false);
+  const [testSent, setTestSent] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!('Notification' in window)) {
+      setPermissionStatus('unsupported');
+    } else {
+      setPermissionStatus(Notification.permission);
+    }
+
+    try {
+      setIsIframe(window.self !== window.top);
+    } catch (e) {
+      setIsIframe(true);
+    }
+  }, []);
+
+  const handleRequestPermission = async () => {
+    if (!('Notification' in window)) {
+      alert('Your browser or platform does not support browser-level notifications.');
+      return;
+    }
+
+    try {
+      const result = await Notification.requestPermission();
+      setPermissionStatus(result);
+    } catch (err) {
+      console.error('Failed to request permission:', err);
+    }
+  };
+
+  const handleTestNotification = () => {
+    if (!('Notification' in window)) return;
+
+    if (Notification.permission === 'granted') {
+      setTestSent(true);
+      
+      // Trigger instant notification
+      new Notification('ICH 100L Alerts 🔔', {
+        body: 'Connection established! Popup alerts are now enabled on your device.',
+        icon: '/favicon.ico',
+        tag: 'ich-test-notif'
+      });
+
+      // Reset test message state after a delay
+      setTimeout(() => setTestSent(false), 4000);
+    } else {
+      handleRequestPermission();
+    }
+  };
+
+  const handleOpenNewTab = () => {
+    window.open(window.location.href, '_blank');
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Panel */}
@@ -73,6 +130,79 @@ export default function NotificationsPage({
           </span>
         )}
       </div>
+
+      {/* Phone/Device Push Alert Controller Panel */}
+      <GlassCard className="p-4 bg-gradient-to-br from-slate-900 via-indigo-950/10 to-slate-950 border-slate-850 text-left relative overflow-hidden">
+        <div className="absolute right-0 top-0 w-32 h-32 rounded-full bg-indigo-505/5 blur-3xl pointer-events-none" />
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 w-full">
+          <div className="space-y-1 flex-1">
+            <h3 className="text-sm font-display font-extrabold text-slate-100 flex items-center gap-1.5">
+              <Smartphone className="w-4 h-4 text-indigo-400" />
+              <span>Lockscreen & Phone Alerts</span>
+            </h3>
+            <p className="text-xs text-slate-400 font-sans leading-relaxed">
+              Get instant popup notices on your phone when Course Reps schedule new classes, push timetable adjustments, or publish crucial deadlines.
+            </p>
+
+            {isIframe ? (
+              <div className="p-2 rounded-lg bg-indigo-950/40 border border-indigo-500/20 text-[11px] text-slate-300 flex items-start gap-1.5 leading-normal mt-2.5">
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5 text-indigo-400" />
+                <span>
+                  <strong>Preview Note:</strong> Device popups require the app to run in its own tab. Click <strong>Open in New Tab</strong> to request permission.
+                </span>
+              </div>
+            ) : permissionStatus === 'granted' ? (
+              <div className="mt-2 text-emerald-400 text-[11px] font-sans flex items-center gap-1.5 bg-emerald-950/20 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg w-fit">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Lockscreen popup alerts are active on this browser!</span>
+              </div>
+            ) : permissionStatus === 'denied' ? (
+              <div className="mt-2 text-rose-400 text-[11px] font-sans flex items-center gap-1.5 bg-rose-950/25 border border-rose-500/20 px-2.5 py-1.5 rounded-lg w-fit">
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                <span>Blocked: Reset site permissions in your browser URL bar.</span>
+              </div>
+            ) : (
+              <div className="mt-2 text-slate-400 text-[11px] font-sans flex items-center gap-1.5 bg-slate-950/40 border border-slate-800 px-2.5 py-1.5 rounded-lg w-fit">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                <span>Alerts status: Inactive</span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 w-full sm:w-auto">
+            {isIframe ? (
+              <button
+                onClick={handleOpenNewTab}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:shadow-[0_4px_16px_rgba(99,102,241,0.3)] border-none outline-none"
+              >
+                <Smartphone className="w-4 h-4" />
+                <span>Open in New Tab</span>
+              </button>
+            ) : permissionStatus === 'granted' ? (
+              <button
+                onClick={handleTestNotification}
+                disabled={testSent}
+                className={`w-full sm:w-auto px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 border-none outline-none ${
+                  testSent 
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                    : 'bg-indigo-600 hover:bg-indigo-505 text-white'
+                }`}
+              >
+                <BellRing className="w-4 h-4" />
+                <span>{testSent ? 'Sending alert...' : 'Send Test Alert'}</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleRequestPermission}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-bold bg-slate-100 hover:bg-white text-slate-950 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 border-none outline-none"
+              >
+                <Bell className="w-4 h-4" />
+                <span>Enable Alerts</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </GlassCard>
 
       {/* Control Actions toolbar */}
       {notifications.length > 0 && (

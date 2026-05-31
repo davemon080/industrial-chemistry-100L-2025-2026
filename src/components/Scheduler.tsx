@@ -17,6 +17,7 @@ interface SchedulerProps {
   onEditActivity: (activity: Activity) => void;
   daySelected: DayOfWeek;
   setDaySelected: (day: DayOfWeek) => void;
+  onOpenCalendar: () => void;
 }
 
 const DAYS_OF_WEEK: DayOfWeek[] = [
@@ -36,7 +37,8 @@ export default function Scheduler({
   onDeleteActivity,
   onEditActivity,
   daySelected,
-  setDaySelected
+  setDaySelected,
+  onOpenCalendar
 }: SchedulerProps) {
   const [hoveredActivity, setHoveredActivity] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(new Date());
@@ -49,6 +51,25 @@ export default function Scheduler({
     }, 10000); // 10s checks
     return () => clearInterval(interval);
   }, []);
+
+  // Smooth scroll active day button into view safely without shifting outer page layout
+  useEffect(() => {
+    const container = document.getElementById('day-buttons-container');
+    const selectedBtn = document.getElementById(`day-btn-${daySelected}`);
+    if (container && selectedBtn) {
+      const containerWidth = container.offsetWidth;
+      const btnOffsetLeft = selectedBtn.offsetLeft;
+      const btnWidth = selectedBtn.offsetWidth;
+      
+      // Calculate scroll position to center the button within the container
+      const targetScrollLeft = btnOffsetLeft - (containerWidth / 2) + (btnWidth / 2);
+      
+      container.scrollTo({
+        left: targetScrollLeft,
+        behavior: 'smooth'
+      });
+    }
+  }, [daySelected]);
 
   const getDateForDay = (day: DayOfWeek) => {
     const dayIndex = DAYS_OF_WEEK.indexOf(day);
@@ -92,11 +113,28 @@ export default function Scheduler({
     }
   };
 
+  const getYYYYMMDDForDay = (day: DayOfWeek) => {
+    const dayIndex = DAYS_OF_WEEK.indexOf(day);
+    const currentDayOfWeek = now.getDay();
+    const currentMondayOffset = (currentDayOfWeek === 0 ? 6 : currentDayOfWeek - 1);
+    const targetDate = new Date(now);
+    targetDate.setDate(now.getDate() - currentMondayOffset + dayIndex);
+    const yyyy = targetDate.getFullYear();
+    const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(targetDate.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   // Filter activities based on selection and sort:
   // 1. Live classes are pinned to the absolute top of the day
   // 2. Followed by newest added/latest schedules descending by ID
   const activeDayActivities = activities
-    .filter((act) => act.day === daySelected)
+    .filter((act) => {
+      if (act.date) {
+        return act.date === getYYYYMMDDForDay(daySelected);
+      }
+      return act.day === daySelected;
+    })
     .sort((a, b) => {
       const aLive = checkIfLive(a);
       const bLive = checkIfLive(b);
@@ -110,7 +148,12 @@ export default function Scheduler({
 
   // Count activities for each day to render beautiful markers
   const getCountForDay = (day: DayOfWeek) => {
-    return activities.filter((act) => act.day === day).length;
+    return activities.filter((act) => {
+      if (act.date) {
+        return act.date === getYYYYMMDDForDay(day);
+      }
+      return act.day === day;
+    }).length;
   };
 
   const getCategoryColor = (category: string) => {
@@ -132,11 +175,22 @@ export default function Scheduler({
     <div className="space-y-6">
       {/* Horizontally aligned weekdays at the top */}
       <div>
-        <h3 className="text-xs font-mono text-slate-400 uppercase tracking-widest mb-3 font-semibold px-1">
-          Select Day Timeline
-        </h3>
+        <div className="flex justify-between items-center mb-3 px-1">
+          <h3 className="text-xs font-mono text-slate-400 uppercase tracking-widest font-semibold">
+            Select Day Timeline
+          </h3>
+          <button
+            type="button"
+            onClick={onOpenCalendar}
+            className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors flex items-center justify-center gap-1.5 cursor-pointer bg-slate-900 border border-slate-800 hover:border-slate-750 px-3 py-1.5 rounded-xl pointer-events-auto shadow-sm outline-none"
+            id="scheduler-calendar-link"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Calendar</span>
+          </button>
+        </div>
         
-        <div className="flex gap-2.5 overflow-x-auto pb-3 pt-1 no-scrollbar -mx-4 px-4 snap-x">
+        <div id="day-buttons-container" className="flex gap-2.5 overflow-x-auto pb-3 pt-1 no-scrollbar -mx-4 px-4 snap-x">
           {DAYS_OF_WEEK.map((day) => {
             const isSelected = daySelected === day;
             const count = getCountForDay(day);
@@ -145,6 +199,7 @@ export default function Scheduler({
             return (
               <button
                 key={day}
+                id={`day-btn-${day}`}
                 onClick={() => setDaySelected(day)}
                 className={`snap-center shrink-0 min-w-[76px] py-2.5 px-3 rounded-2xl flex flex-col items-center justify-between transition-all duration-300 pointer-events-auto cursor-pointer focus:outline-none relative ${
                   isSelected
@@ -262,7 +317,7 @@ export default function Scheduler({
                       <div className="space-y-3 flex-1 min-w-0">
                         {/* Top labels */}
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-mono font-bold tracking-wide text-indigo-400">
+                          <span className="text-sm font-mono font-black tracking-wide text-indigo-400 bg-slate-950/60 px-2.5 py-0.5 rounded border border-indigo-500/30 uppercase">
                             {activity.courseCode}
                           </span>
                           

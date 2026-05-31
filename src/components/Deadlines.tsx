@@ -194,7 +194,7 @@ export default function Deadlines({
                       <div className="flex-1 space-y-2 min-w-0">
                         {/* Upper line metadata */}
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-mono font-bold text-indigo-400">
+                          <span className="text-sm font-mono font-black tracking-wide text-indigo-400 bg-slate-950/60 px-2.5 py-0.5 rounded border border-indigo-500/30 uppercase">
                             {dl.courseCode}
                           </span>
 

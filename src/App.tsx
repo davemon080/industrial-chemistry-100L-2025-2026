@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Award, GraduationCap, Clock, Bell, LogOut, CheckCircle2, Loader2 } from 'lucide-react';
+import { Plus, Award, GraduationCap, Clock, Bell, LogOut, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 
 import { User, DayOfWeek, Activity, Deadline, Announcement } from './types';
 import {
@@ -30,13 +30,31 @@ import AddEditPage from './components/AddEditPage';
 import NotificationsPage, { NotificationItem } from './components/NotificationsPage';
 import SubscriptionPaywall from './components/SubscriptionPaywall';
 import ModulesView from './components/ModulesView';
+import CalendarView from './components/CalendarView';
+import DateScheduleView from './components/DateScheduleView';
 
 function getMondayOfCurrentWeek(): string {
   const now = new Date();
   const day = now.getDay();
   const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(now.setDate(diff));
-  return monday.toISOString().split('T')[0];
+  const monday = new Date(now.getFullYear(), now.getMonth(), diff);
+  const yyyy = monday.getFullYear();
+  const mm = String(monday.getMonth() + 1).padStart(2, '0');
+  const dd = String(monday.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function getMondayOfDateString(dateStr: string): string {
+  if (!dateStr) return '';
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(year, month - 1, day);
+  const dayOfWeek = d.getDay();
+  const diff = d.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+  const monday = new Date(d.getFullYear(), d.getMonth(), diff);
+  const yyyy = monday.getFullYear();
+  const mm = String(monday.getMonth() + 1).padStart(2, '0');
+  const dd = String(monday.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function getInitials(nm: string) {
@@ -44,6 +62,20 @@ function getInitials(nm: string) {
   const parts = nm.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function registerDeletedActivityLocally(activity: Activity) {
+  try {
+    const stored = localStorage.getItem('ich100l_deleted_activities');
+    const list: Activity[] = stored ? JSON.parse(stored) : [];
+    if (!list.some((item) => item.id === activity.id)) {
+      list.push(activity);
+      localStorage.setItem('ich100l_deleted_activities', JSON.stringify(list));
+      window.dispatchEvent(new Event('ich100l_deleted_activities_updated'));
+    }
+  } catch (e) {
+    console.warn('Failed to save deleted activity to local storage:', e);
+  }
 }
 
 export default function App() {
@@ -65,6 +97,7 @@ export default function App() {
   // Listen to subscription status in real-time
   const [subStatus, setSubStatus] = useState<'loading' | 'active' | 'inactive'>('loading');
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
+  const [trialDetails, setTrialDetails] = useState<{ isTrial: boolean; daysRemaining: number } | null>(null);
 
   // Logo branding status
   const [logoUrl, setLogoUrl] = useState<string>('');
@@ -176,8 +209,19 @@ export default function App() {
           });
           const data = await res.json();
           if (data.success) {
-            const expiryDate = new Date();
+            const now = new Date();
+            let expiryDate = new Date();
             expiryDate.setDate(expiryDate.getDate() + 30); // 30-day billing period
+
+            if (currentUser.createdAt) {
+              const regTime = new Date(currentUser.createdAt).getTime();
+              const trialDuration = 7 * 24 * 60 * 60 * 1000; // 7 days (1 week)
+              const trialEndTime = regTime + trialDuration;
+              if (now.getTime() < trialEndTime) {
+                // Subscription starts from after the 7-day trial ends
+                expiryDate = new Date(trialEndTime + 30 * 24 * 60 * 60 * 1000);
+              }
+            }
 
             const subData = {
               status: 'active',
@@ -253,6 +297,57 @@ export default function App() {
       return;
     }
 
+    // Trial checker helper to evaluate registration and remaining 1 week period
+    const checkAndGetTrial = () => {
+      let regDateStr = currentUser.createdAt;
+      if (!regDateStr) {
+        const storedUsers = localStorage.getItem('ich100l_users_db');
+        if (storedUsers) {
+          try {
+            const dbRef = JSON.parse(storedUsers);
+            if (dbRef[currentUser.matricNumber]?.createdAt) {
+              regDateStr = dbRef[currentUser.matricNumber].createdAt;
+            }
+          } catch(e) {}
+        }
+      }
+
+      if (!regDateStr) {
+        const nowStr = new Date().toISOString();
+        regDateStr = nowStr;
+        const updatedUser = { ...currentUser, createdAt: nowStr };
+        setCurrentUser(updatedUser);
+        localStorage.setItem('ich100l_user', JSON.stringify(updatedUser));
+        
+        try {
+          const storedUsers = localStorage.getItem('ich100l_users_db');
+          const dbRef = storedUsers ? JSON.parse(storedUsers) : {};
+          if (!dbRef[currentUser.matricNumber]) {
+            dbRef[currentUser.matricNumber] = { ...currentUser, password: 'password123' };
+          }
+          dbRef[currentUser.matricNumber].createdAt = nowStr;
+          localStorage.setItem('ich100l_users_db', JSON.stringify(dbRef));
+        } catch(e) {}
+
+        try {
+          setDoc(doc(db, 'users', getSafeDocId(currentUser.matricNumber)), { createdAt: nowStr }, { merge: true });
+        } catch(e) {}
+      }
+
+      const regTime = new Date(regDateStr).getTime();
+      const nowTime = new Date().getTime();
+      const trialDuration = 7 * 24 * 60 * 60 * 1000; // 7 days (1 week)
+      const isTrial = (nowTime - regTime) < trialDuration;
+      const msLeft = regTime + trialDuration - nowTime;
+      const daysRemaining = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
+      return { isTrial, daysRemaining };
+    };
+
+    const trial = checkAndGetTrial();
+    setTrialDetails(trial);
+
+    // Initial cache check
+    let hasValidPaidSub = false;
     try {
       const cached = localStorage.getItem(`ich100l_sub_${currentUser.matricNumber}`);
       if (cached) {
@@ -260,13 +355,32 @@ export default function App() {
         if (parsed.expiryDate && parsed.expiryDate > new Date().toISOString()) {
           setSubStatus('active');
           setSubscriptionDetails(parsed);
+          hasValidPaidSub = true;
         }
       }
     } catch (e) {
       console.warn('Read cached subscription failed:', e);
     }
 
+    // Fallback if no valid sub but trial is active
+    if (!hasValidPaidSub) {
+      if (trial.isTrial) {
+        setSubStatus('active');
+        setSubscriptionDetails({
+          status: 'active',
+          isTrial: true,
+          expiryDate: new Date(new Date(currentUser.createdAt || new Date()).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          reference: 'FREE-TRIAL'
+        });
+      } else {
+        setSubStatus('inactive');
+      }
+    }
+
     const unsubscribe = onSnapshot(doc(db, 'subscriptions', getSafeDocId(currentUser.matricNumber)), (docSnap) => {
+      const currentTrial = checkAndGetTrial();
+      setTrialDetails(currentTrial);
+
       if (docSnap.exists()) {
         const data = docSnap.data();
         const isExpired = data.expiryDate ? new Date().toISOString() > data.expiryDate : true;
@@ -278,17 +392,46 @@ export default function App() {
           reference: data.reference
         };
 
-        setSubscriptionDetails(details);
-        setSubStatus(isExpired ? 'inactive' : 'active');
-        localStorage.setItem(`ich100l_sub_${currentUser.matricNumber}`, JSON.stringify(details));
+        if (!isExpired) {
+          setSubscriptionDetails(details);
+          setSubStatus('active');
+          localStorage.setItem(`ich100l_sub_${currentUser.matricNumber}`, JSON.stringify(details));
+        } else {
+          // If expired, check if trial is still active
+          if (currentTrial.isTrial) {
+            setSubscriptionDetails({
+              status: 'active',
+              isTrial: true,
+              expiryDate: new Date(new Date(currentUser.createdAt || new Date()).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+              reference: 'FREE-TRIAL'
+            });
+            setSubStatus('active');
+          } else {
+            setSubscriptionDetails(details);
+            setSubStatus('inactive');
+            localStorage.setItem(`ich100l_sub_${currentUser.matricNumber}`, JSON.stringify(details));
+          }
+        }
       } else {
-        setSubscriptionDetails({ status: 'inactive' });
-        setSubStatus('inactive');
-        localStorage.removeItem(`ich100l_sub_${currentUser.matricNumber}`);
+        // No subscription document, check trial
+        if (currentTrial.isTrial) {
+          setSubscriptionDetails({
+            status: 'active',
+            isTrial: true,
+            expiryDate: new Date(new Date(currentUser.createdAt || new Date()).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+            reference: 'FREE-TRIAL'
+          });
+          setSubStatus('active');
+        } else {
+          setSubscriptionDetails({ status: 'inactive' });
+          setSubStatus('inactive');
+          localStorage.removeItem(`ich100l_sub_${currentUser.matricNumber}`);
+        }
       }
     }, (error) => {
       console.warn('Listening to subscriptions collection failed:', error);
-      setSubStatus((prev) => prev === 'loading' ? 'inactive' : prev);
+      const currentTrial = checkAndGetTrial();
+      setSubStatus(currentTrial.isTrial ? 'active' : 'inactive');
     });
 
     return () => unsubscribe();
@@ -308,7 +451,16 @@ export default function App() {
     } catch(err) {}
   };
 
-  // Self-Seed Default Academic Starter Data if Firestore collections are empty (with automatic weekly rollover)
+  // One-time initialization to clear any previously seeded default activities from the archive bin
+  useEffect(() => {
+    if (!localStorage.getItem('ich100l_bin_cleared_v2')) {
+      localStorage.removeItem('ich100l_deleted_activities');
+      localStorage.setItem('ich100l_bin_cleared_v2', 'true');
+      window.dispatchEvent(new Event('ich100l_deleted_activities_updated'));
+    }
+  }, []);
+
+  // Wipes all preloaded defaults and enforces automatic weekly rollover (partitioning past/future)
   useEffect(() => {
     if (!currentUser) return;
 
@@ -331,19 +483,50 @@ export default function App() {
         if (needsWipe) {
           console.log('entering a new week! wipe all previous week documents...');
           
+          // Partition Activities: Only move past week's items to the local bin, keep future ones live
           const actSnap = await getDocs(collection(db, 'activities'));
           for (const d of actSnap.docs) {
-            await deleteDoc(doc(db, 'activities', d.id));
+            const data = { ...d.data(), id: d.id } as Activity;
+            
+            let belongsToPast = false;
+            if (data.date) {
+              const actMonday = getMondayOfDateString(data.date);
+              if (actMonday < currentMonday) {
+                belongsToPast = true;
+              }
+            } else {
+              // Repeating schedules without custom Date are considered part of the last week's layout, so we roll them to bin
+              belongsToPast = true;
+            }
+
+            if (belongsToPast) {
+              registerDeletedActivityLocally(data);
+              await deleteDoc(doc(db, 'activities', d.id));
+            }
           }
 
+          // Partition Deadlines: Only delete deadlines from previous weeks
           const dlSnap = await getDocs(collection(db, 'deadlines'));
           for (const d of dlSnap.docs) {
-            await deleteDoc(doc(db, 'deadlines', d.id));
+            const data = d.data() as Deadline;
+            if (data.dueDate) {
+              const dlMonday = getMondayOfDateString(data.dueDate);
+              if (dlMonday < currentMonday) {
+                await deleteDoc(doc(db, 'deadlines', d.id));
+              }
+            }
           }
 
+          // Partition Announcements: Only delete old announcements from previous weeks
           const annSnap = await getDocs(collection(db, 'announcements'));
           for (const d of annSnap.docs) {
-            await deleteDoc(doc(db, 'announcements', d.id));
+            const data = d.data() as Announcement;
+            if (data.date) {
+              const annMonday = getMondayOfDateString(data.date);
+              if (annMonday < currentMonday) {
+                await deleteDoc(doc(db, 'announcements', d.id));
+              }
+            }
           }
 
           await setDoc(configRef, { 
@@ -353,35 +536,19 @@ export default function App() {
           console.log('Automated week rollover database sweep completed.');
         }
 
-        // Now seed default structures if they are now empty (or were empty originally)
-        const activitiesRef = collection(db, 'activities');
-        const activitiesSnap = await getDocs(activitiesRef);
-        if (activitiesSnap.empty) {
-          console.log('Database empty: Seeding default class schedule...');
-          for (const act of DEFAULT_ACTIVITIES) {
-            await setDoc(doc(db, 'activities', act.id), cleanData(act));
-          }
+        // Anti-Seeding Rule: Ensure all default seeded mock datas are COMPLETELY wiped from Firestore
+        for (const act of DEFAULT_ACTIVITIES) {
+          await deleteDoc(doc(db, 'activities', act.id));
+        }
+        for (const dl of DEFAULT_DEADLINES) {
+          await deleteDoc(doc(db, 'deadlines', dl.id));
+        }
+        for (const ann of DEFAULT_ANNOUNCEMENTS) {
+          await deleteDoc(doc(db, 'announcements', ann.id));
         }
 
-        const deadlinesRef = collection(db, 'deadlines');
-        const deadlinesSnap = await getDocs(deadlinesRef);
-        if (deadlinesSnap.empty) {
-          console.log('Database empty: Seeding default chemical assignments...');
-          for (const dl of DEFAULT_DEADLINES) {
-            await setDoc(doc(db, 'deadlines', dl.id), cleanData(dl));
-          }
-        }
-
-        const announcementsRef = collection(db, 'announcements');
-        const announcementsSnap = await getDocs(announcementsRef);
-        if (announcementsSnap.empty) {
-          console.log('Database empty: Seeding default announcements...');
-          for (const ann of DEFAULT_ANNOUNCEMENTS) {
-            await setDoc(doc(db, 'announcements', ann.id), cleanData(ann));
-          }
-        }
       } catch (err) {
-        console.warn('Auto-rollover and seeding failed:', err);
+        console.warn('Auto-rollover and cleaning failed:', err);
       }
     };
 
@@ -435,7 +602,8 @@ export default function App() {
               setNotifications((prev) => [notif, ...prev]);
             }
           } else if (change.type === 'removed') {
-            const data = change.doc.data() as Activity;
+            const data = { ...change.doc.data(), id: change.doc.id } as Activity;
+            registerDeletedActivityLocally(data);
             if (data.createdBy !== currentUser.matricNumber) {
               const notif: NotificationItem = {
                 id: `notif-act-rem-${Date.now()}-${change.doc.id}`,
@@ -652,16 +820,42 @@ export default function App() {
   });
 
   // UI state managers
-  const [activeTab, setActiveTab] = useState<TabType>('schedule');
-  const [daySelected, setDaySelected] = useState<DayOfWeek>('Monday');
+  const [activeTab, setActiveTab] = useState<any>('schedule');
+  const [daySelected, setDaySelected] = useState<DayOfWeek>(() => {
+    const days: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return days[new Date().getDay()];
+  });
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<Date | null>(null);
   const [addingOrEditing, setAddingOrEditing] = useState<{
     type: 'schedule' | 'deadline' | 'announcement';
     editActivity?: Activity | null;
   } | null>(null);
 
-  // Sync to localStorage on updates
+  const lastNotificationsCountRef = useRef(notifications.length);
+
+  // Sync to localStorage on updates and trigger native lockscreen popups
   useEffect(() => {
     localStorage.setItem('ich100l_notifications', JSON.stringify(notifications));
+
+    // Only fire alerts if we have a NEW notification (to prevent spam on initial load)
+    if (notifications.length > lastNotificationsCountRef.current) {
+      const latestNotif = notifications[0];
+      if (latestNotif && !latestNotif.isRead) {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(latestNotif.title, {
+              body: latestNotif.body,
+              icon: '/favicon.ico',
+              vibrate: [200, 100, 200],
+              tag: latestNotif.id
+            } as any);
+          } catch (e) {
+            console.error('Failed to trigger native lockscreen notification:', e);
+          }
+        }
+      }
+    }
+    lastNotificationsCountRef.current = notifications.length;
   }, [notifications]);
 
   // Sync to localStorage on updates
@@ -697,13 +891,10 @@ export default function App() {
   // Reset database back to syllabus default starter set in Firestore
   const handleResetData = async () => {
     try {
-      // 1. Reset Activities
+      // 1. Reset Activities (Empty everything without seeding defaults)
       const actSnap = await getDocs(collection(db, 'activities'));
       for (const d of actSnap.docs) {
         await deleteDoc(doc(db, 'activities', d.id));
-      }
-      for (const act of DEFAULT_ACTIVITIES) {
-        await setDoc(doc(db, 'activities', act.id), cleanData(act));
       }
 
       // 2. Reset Deadlines
@@ -775,6 +966,10 @@ export default function App() {
   };
 
   const handleDeleteActivity = async (id: string) => {
+    const actToDelete = activities.find((a) => a.id === id);
+    if (actToDelete) {
+      registerDeletedActivityLocally(actToDelete);
+    }
     try {
       await deleteDoc(doc(db, 'activities', id));
     } catch (err) {
@@ -895,14 +1090,15 @@ export default function App() {
     }
 
     // Paywall blocks access to schedule, deadlines, announcements, and modules
-    const isRestrictedTab = ['schedule', 'deadlines', 'announcements', 'modules'].includes(activeTab);
+    const isRestrictedTab = ['schedule', 'deadlines', 'announcements', 'modules', 'calendar'].includes(activeTab);
     if (subStatus === 'inactive' && isRestrictedTab) {
       return (
         <SubscriptionPaywall 
           user={{
             email: currentUser?.email || 'student@ich100l.edu',
             matricNumber: currentUser?.matricNumber || '',
-            name: currentUser?.name || 'Chemistry Student'
+            name: currentUser?.name || 'Chemistry Student',
+            createdAt: currentUser?.createdAt
           }}
           subStatus={subStatus}
           isCourseRep={isCourseRep}
@@ -922,7 +1118,8 @@ export default function App() {
             user={{
               email: currentUser?.email || 'student@ich100l.edu',
               matricNumber: currentUser?.matricNumber || '',
-              name: currentUser?.name || 'Chemistry Student'
+              name: currentUser?.name || 'Chemistry Student',
+              createdAt: currentUser?.createdAt
             }}
             subStatus={subStatus}
             isCourseRep={isCourseRep}
@@ -949,6 +1146,37 @@ export default function App() {
             onEditActivity={(act) => setAddingOrEditing({ type: 'schedule', editActivity: act })}
             daySelected={daySelected}
             setDaySelected={setDaySelected}
+            onOpenCalendar={() => setActiveTab('calendar' as any)}
+          />
+        );
+      case 'calendar' as any:
+        return (
+          <CalendarView
+            activities={activities}
+            currentUserMatric={currentUser?.matricNumber || ''}
+            onBack={() => setActiveTab('schedule')}
+            onSelectDate={(date) => {
+              setSelectedCalendarDate(date);
+              setActiveTab('date-schedule');
+            }}
+          />
+        );
+      case 'date-schedule':
+        return (
+          <DateScheduleView
+            selectedDate={selectedCalendarDate || new Date()}
+            activities={activities}
+            isCourseRep={isCourseRep}
+            onBackToCalendar={() => {
+              setActiveTab('calendar' as any);
+            }}
+            onEditActivity={(act) => {
+              setAddingOrEditing({ type: 'schedule', editActivity: act });
+            }}
+            onDeleteActivity={handleDeleteActivity}
+            onAddActivityClick={() => {
+              setAddingOrEditing({ type: 'schedule', editActivity: null });
+            }}
           />
         );
       case 'deadlines':
@@ -974,12 +1202,20 @@ export default function App() {
             user={{
               email: currentUser?.email || '',
               matricNumber: currentUser?.matricNumber || '',
-              name: currentUser?.name || 'Student'
+              name: currentUser?.name || 'Student',
+              createdAt: currentUser?.createdAt
             }}
             onLogout={handleLogout}
             onResetData={handleResetData}
             stats={{
-              totalActivities: activities.length,
+              totalActivities: activities.filter(act => {
+                if (act.date) {
+                  const actMonday = getMondayOfDateString(act.date);
+                  const currentMonday = getMondayOfCurrentWeek();
+                  return actMonday === currentMonday;
+                }
+                return true;
+              }).length,
               pendingDeadlines: deadlines.filter((d) => !d.isCompleted).length,
               completedDeadlines: deadlines.filter((d) => d.isCompleted).length,
               announcementCount: announcements.length
@@ -1042,6 +1278,7 @@ export default function App() {
                 editActivity={addingOrEditing.editActivity}
                 daySelected={daySelected}
                 currentUserMatric={currentUser?.matricNumber || ''}
+                initialDate={activeTab === 'date-schedule' && selectedCalendarDate ? `${selectedCalendarDate.getFullYear()}-${String(selectedCalendarDate.getMonth() + 1).padStart(2, '0')}-${String(selectedCalendarDate.getDate()).padStart(2, '0')}` : ''}
                 onAddActivity={handleAddActivity}
                 onUpdateActivity={handleUpdateActivity}
                 onAddDeadline={handleAddDeadline}
@@ -1238,6 +1475,23 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {trialDetails?.isTrial && !isCourseRep && subscriptionDetails?.isTrial && (
+        <div className="bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-indigo-500/10 border-b border-indigo-500/20 py-2.5 px-4 shadow-[0_2px_8px_rgba(99,102,241,0.1)] shrink-0 z-20">
+          <div className="max-w-md mx-auto flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
+              <p className="text-xs font-sans text-slate-200">
+                You're on a <strong className="text-indigo-300">1-week free trial</strong>
+              </p>
+            </div>
+            <div className="flex items-center gap-1 bg-indigo-500/15 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+              <Clock className="w-3.5 h-3.5 text-indigo-300" />
+              <span className="text-[10px] font-mono font-semibold text-indigo-200">{trialDetails.daysRemaining} days left</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Prime Core Scrollable workspace container */}
       <main className="flex-1 overflow-y-auto max-w-md mx-auto w-full px-4 pt-6 pb-32 z-10 no-scrollbar">

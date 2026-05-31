@@ -41,7 +41,7 @@ const loadPaystack = (): Promise<void> => {
 };
 
 interface SubscriptionPaywallProps {
-  user: { email: string; matricNumber: string; name: string };
+  user: { email: string; matricNumber: string; name: string; createdAt?: string };
   subStatus: 'loading' | 'active' | 'inactive';
   isCourseRep: boolean;
   subscriptionDetails: any;
@@ -115,8 +115,19 @@ export default function SubscriptionPaywall({
       const verifyData = await verifyRes.json();
 
       if (verifyData.success) {
-        const expiryDate = new Date();
+        const now = new Date();
+        let expiryDate = new Date();
         expiryDate.setDate(expiryDate.getDate() + 30); // 30-day billing pass
+
+        if (user.createdAt) {
+          const regTime = new Date(user.createdAt).getTime();
+          const trialDuration = 7 * 24 * 60 * 60 * 1000; // 7 days (1 week)
+          const trialEndTime = regTime + trialDuration;
+          if (now.getTime() < trialEndTime) {
+            // Subscription starts from after the 7-day trial ends
+            expiryDate = new Date(trialEndTime + 30 * 24 * 60 * 60 * 1000);
+          }
+        }
 
         const subData = {
           status: 'active',
@@ -176,7 +187,12 @@ export default function SubscriptionPaywall({
       await loadPaystack();
 
       // 2. Fetch the correct Public API Key
-      const publicKey = ((import.meta as any).env.VITE_PAYSTACK_PUBLIC_KEY) || "pk_live_1bc5a10e4f9ed8ca685c5a699e85f22741cc3759";
+      const publicKey = (import.meta as any).env.VITE_PAYSTACK_PUBLIC_KEY || "";
+      if (!publicKey) {
+        setErrorMessage("Payment portal is unavailable as VITE_PAYSTACK_PUBLIC_KEY is not defined.");
+        setIsProcessing(false);
+        return;
+      }
       const reference = `sub-${user.matricNumber.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
       const email = user.email || `${user.matricNumber.replace(/\//g, '_')}@ich100l.edu`;
 

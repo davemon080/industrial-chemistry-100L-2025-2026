@@ -426,7 +426,7 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
                       <div className="flex justify-between items-start gap-3">
                         <div className="space-y-1 text-left flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-mono font-extrabold text-indigo-400">
+                            <span className="px-2.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-sm font-mono font-black text-indigo-400 uppercase">
                               {course.courseCode}
                             </span>
                           </div>
@@ -504,7 +504,7 @@ export default function ModulesView({ isCourseRep, userMatric }: ModulesViewProp
             <GlassCard className="p-4 bg-gradient-to-tr from-slate-900/60 to-indigo-950/20 border-slate-850 text-left relative overflow-hidden">
               <div className="absolute right-0 top-0 w-24 h-24 rounded-full bg-indigo-500/5 blur-2xl pointer-events-none" />
               <div className="space-y-1.5">
-                <span className="px-2.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[10px] font-mono font-extrabold text-indigo-400 inline-block">
+                <span className="px-2.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-sm font-mono font-black text-indigo-400 uppercase inline-block">
                   {selectedCourse.courseCode}
                 </span>
                 <h2 className="text-sm font-display font-extrabold text-slate-100">{selectedCourse.title}</h2>

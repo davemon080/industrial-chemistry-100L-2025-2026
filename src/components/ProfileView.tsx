@@ -83,7 +83,7 @@ const saveUserToDB = (user: any) => {
 };
 
 interface ProfileViewProps {
-  user: { email: string; matricNumber: string; name: string };
+  user: { email: string; matricNumber: string; name: string; createdAt?: string };
   onLogout: () => void;
   onResetData: () => void;
   stats: {
@@ -230,8 +230,19 @@ export default function ProfileView({
       const verifyData = await verifyRes.json();
 
       if (verifyData.success) {
-        const expiryDate = new Date();
+        const now = new Date();
+        let expiryDate = new Date();
         expiryDate.setDate(expiryDate.getDate() + 30);
+
+        if (user.createdAt) {
+          const regTime = new Date(user.createdAt).getTime();
+          const trialDuration = 7 * 24 * 60 * 60 * 1000; // 7 days (1 week)
+          const trialEndTime = regTime + trialDuration;
+          if (now.getTime() < trialEndTime) {
+            // Subscription starts from after the 7-day trial ends
+            expiryDate = new Date(trialEndTime + 30 * 24 * 60 * 60 * 1000);
+          }
+        }
 
         const subData = {
           status: 'active',
@@ -293,7 +304,12 @@ export default function ProfileView({
       await loadPaystackInProfile();
 
       // 2. Fetch public key & variables
-      const publicKey = (import.meta as any).env.VITE_PAYSTACK_PUBLIC_KEY || "pk_live_1bc5a10e4f9ed8ca685c5a699e85f22741cc3759";
+      const publicKey = (import.meta as any).env.VITE_PAYSTACK_PUBLIC_KEY || "";
+      if (!publicKey) {
+        setSubPayError("Payment portal is unavailable as VITE_PAYSTACK_PUBLIC_KEY is not defined.");
+        setIsPayingSub(false);
+        return;
+      }
       const reference = `sub-${user.matricNumber.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
       const email = user.email || `${user.matricNumber.replace(/\//g, '_')}@ich100l.edu`;
 
@@ -714,25 +730,7 @@ export default function ProfileView({
           )}
         </div>
 
-        {/* Reset Database triggers */}
-        <button
-          onClick={() => {
-            if (confirm('Warning: This will clear all custom additions and reset the course timetable/deadlines back to pristine factory values. Continue?')) {
-              onResetData();
-            }
-          }}
-          className="w-full p-4 rounded-2xl glassmorphism-hover glassmorphism border border-slate-800 text-left flex items-center justify-between pointer-events-auto cursor-pointer outline-none group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-slate-950 text-slate-400 group-hover:text-indigo-400 transition-colors">
-              <RefreshCcw className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-sm font-sans font-medium text-slate-200">Reset Timetable to Defaults</p>
-              <p className="text-xs text-slate-500 font-sans">Restores the starter chemistry practical syllabus</p>
-            </div>
-          </div>
-        </button>
+
 
         {/* LOGOUT Button */}
         <button

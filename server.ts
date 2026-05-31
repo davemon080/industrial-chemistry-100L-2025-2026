@@ -84,7 +84,10 @@ async function startServer() {
       return res.status(400).json({ error: "Reference parameter is required." });
     }
 
-    const paystackSecret = process.env.PAYSTACK_SECRET_KEY || "sk_live_78e8ecb73321e6af714162ffd66dfccec2e8acd3";
+    const paystackSecret = process.env.PAYSTACK_SECRET_KEY || "";
+    if (!paystackSecret) {
+      return res.status(550).json({ success: false, message: "Paystack secret key is not configured in the server environment settings." });
+    }
 
     try {
       const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
@@ -129,7 +132,10 @@ async function startServer() {
       return res.status(400).json({ error: "Email and Matric Number are required." });
     }
 
-    const paystackSecret = process.env.PAYSTACK_SECRET_KEY || "sk_live_78e8ecb73321e6af714162ffd66dfccec2e8acd3";
+    const paystackSecret = process.env.PAYSTACK_SECRET_KEY || "";
+    if (!paystackSecret) {
+      return res.status(550).json({ error: "Paystack secret key is not configured in the server environment." });
+    }
     const amount = 200 * 100; // ₦200 in kobo
 
     const reference = `sub-${matricNumber.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;

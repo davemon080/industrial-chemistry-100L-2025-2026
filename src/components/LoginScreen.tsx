@@ -42,7 +42,7 @@ const saveUserToDB = (user: any) => {
 };
 
 interface LoginScreenProps {
-  onLoginSuccess: (user: { email: string; matricNumber: string; name: string }) => void;
+  onLoginSuccess: (user: { email: string; matricNumber: string; name: string; createdAt?: string }) => void;
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
@@ -86,6 +86,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           email: userData.email,
           matricNumber: userData.matricNumber,
           name: userData.name,
+          createdAt: userData.createdAt,
         });
         return;
       }
@@ -106,6 +107,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         email: existingUser.email,
         matricNumber: existingUser.matricNumber,
         name: existingUser.name,
+        createdAt: existingUser.createdAt,
       });
     } else {
       // Setup dynamic account if they use course rep matric representing fresh first login
@@ -115,6 +117,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           matricNumber: cleanedMatric,
           name: 'David Adebayo',
           password: password,
+          createdAt: new Date().toISOString(),
         };
         try {
           await setDoc(doc(db, 'users', getSafeDocId(cleanedMatric)), defaultRep);
@@ -126,6 +129,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           email: defaultRep.email,
           matricNumber: defaultRep.matricNumber,
           name: defaultRep.name,
+          createdAt: defaultRep.createdAt,
         });
       } else {
         setError('Matric number is not registered yet. Please click "Don\'t have an account?" above to register.');
@@ -166,6 +170,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       matricNumber: cleanedMatric,
       name: name.trim(),
       password: password,
+      createdAt: new Date().toISOString(),
     };
 
     try {
@@ -180,6 +185,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       email: newUser.email,
       matricNumber: newUser.matricNumber,
       name: newUser.name,
+      createdAt: newUser.createdAt,
     });
   };
 
@@ -258,7 +264,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. daveimagodei@gmail.com"
+                  placeholder="e.g. student@ich100l.edu"
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
@@ -276,7 +282,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   required
                   value={matricNumber}
                   onChange={(e) => setMatricNumber(e.target.value)}
-                  placeholder="e.g. 2025/ps/ich/0034"
+                  placeholder="e.g. 2025/ps/ich/1000"
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>

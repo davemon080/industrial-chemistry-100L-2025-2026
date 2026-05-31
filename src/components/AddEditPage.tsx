@@ -82,6 +82,7 @@ interface AddEditPageProps {
   editActivity?: Activity | null; // If editing a schedule activity
   daySelected: DayOfWeek;
   currentUserMatric: string;
+  initialDate?: string; // e.g. "2026-06-03" (YYYY-MM-DD)
   onAddActivity: (activity: Omit<Activity, 'id' | 'createdBy'>) => void;
   onUpdateActivity: (id: string, updated: Omit<Activity, 'id' | 'createdBy'>) => void;
   onAddDeadline: (deadline: Omit<Deadline, 'id' | 'isCompleted' | 'createdBy'>) => void;
@@ -94,6 +95,7 @@ export default function AddEditPage({
   editActivity = null,
   daySelected,
   currentUserMatric,
+  initialDate = '',
   onAddActivity,
   onUpdateActivity,
   onAddDeadline,
@@ -113,6 +115,7 @@ export default function AddEditPage({
   const [actDesc, setActDesc] = useState('');
   const [actDelivery, setActDelivery] = useState<'physical' | 'online'>('physical');
   const [actLink, setActLink] = useState('');
+  const [actDate, setActDate] = useState(initialDate);
 
   // Deadline fields state
   const [dlTitle, setDlTitle] = useState('');
@@ -182,6 +185,7 @@ export default function AddEditPage({
       setActDesc(editActivity.description || '');
       setActDelivery(editActivity.deliveryType || 'physical');
       setActLink(editActivity.classLink || '');
+      setActDate(editActivity.date || '');
     }
   }, [type, editActivity, daySelected]);
 
@@ -204,17 +208,26 @@ export default function AddEditPage({
         return;
       }
 
+      let finalDay = actDay;
+      if (actDate) {
+        const WEEKDAY_NAMES: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const [year, month, day] = actDate.split('-').map(Number);
+        const d = new Date(year, month - 1, day);
+        finalDay = WEEKDAY_NAMES[d.getDay()];
+      }
+
       const activityData = {
         title: actTitle.trim(),
         courseCode: actCourse.trim().toUpperCase(),
-        day: actDay,
+        day: finalDay,
         timeStart: actStart,
         timeEnd: actEnd,
         location: actLocation.trim(),
         category: actCategory,
         description: actDesc.trim() || undefined,
         deliveryType: actDelivery,
-        classLink: actDelivery === 'online' ? actLink.trim() : undefined
+        classLink: actDelivery === 'online' ? actLink.trim() : undefined,
+        date: actDate || undefined
       };
 
       if (isEditing && editActivity) {
@@ -426,15 +439,38 @@ export default function AddEditPage({
                 </div>
               </div>
 
+              {/* Date selection field */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-sans">
+                  Schedule Date (Prefilled for specific calendar events)
+                </label>
+                <input
+                  type="date"
+                  value={actDate}
+                  onChange={(e) => {
+                    const newDate = e.target.value;
+                    setActDate(newDate);
+                    if (newDate) {
+                      const WEEKDAY_NAMES: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                      const [year, month, day] = newDate.split('-').map(Number);
+                      const d = new Date(year, month - 1, day);
+                      setActDay(WEEKDAY_NAMES[d.getDay()]);
+                    }
+                  }}
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                />
+              </div>
+
               {/* Target Timetable Days */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-sans">
-                  Target Weekday
+                  Target Weekday {actDate ? '(Calculated automatically from Date)' : '(Weekly Repeating Day)'}
                 </label>
                 <select
                   value={actDay}
                   onChange={(e) => setActDay(e.target.value as DayOfWeek)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                  disabled={!!actDate}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="Monday">Monday</option>
                   <option value="Tuesday">Tuesday</option>
