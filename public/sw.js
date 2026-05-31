@@ -15,24 +15,92 @@ const ASSETS_TO_CACHE = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE).catch((err) => {
-        console.warn('[PWA SW] Pre-caching on install had minor issues (ignored):', err);
-      });
+    caches.open(CACHE_NAME).then(async (cache) => {
+      console.log('[PWA SW] Resilient activation start. Pre-caching critical assets...');
+      for (const url of ASSETS_TO_CACHE) {
+        try {
+          const response = await fetch(url);
+          if (response.ok) {
+            await cache.put(url, response);
+            console.log(`[PWA SW] Cached successfully: ${url}`);
+          } else {
+            console.warn(`[PWA SW] Skip caching non-200 asset: ${url} (status: ${response.status})`);
+          }
+        } catch (err) {
+          console.warn(`[PWA SW] Skip caching failed asset fetch: ${url}`, err);
+        }
+      }
     }).then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('[PWA SW] Flushing old cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', (event) => {
-  // Let the browser handle standard requests online, fallback to cache if offline
+  // Bypass non-GET requests (e.g., POST/PUT/DELETE tracking and APIs)
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  const url = new URL(event.request.url);
+
+  // Bypass API calls, uploads, or hot-module-reload files
+  if (
+    url.pathname.startsWith('/api/') || 
+    url.pathname.startsWith('/uploads/') || 
+    url.pathname.includes('@vite') || 
+    url.pathname.includes('node_modules') ||
+    url.hostname.includes('googleapis') ||
+    url.hostname.includes('firebase')
+  ) {
+    return;
+  }
+
+  // Intercept standard static assets & pages
   event.respondWith(
-    fetch(event.request).catch(() => {
-      return caches.match(event.request);
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        // Keep a clone of successful stylesheet/image fetches in cache
+        if (networkResponse.ok && event.request.destination === 'image') {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return networkResponse;
+      })
+      .catch(async () => {
+        // Fallback options when device offline
+        const cache = await caches.open(CACHE_NAME);
+        const cachedResponse = await cache.match(event.request);
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+
+        // If it's a browser layout/navigation request, return cached root/index shell
+        if (
+          event.request.mode === 'navigate' || 
+          (event.request.headers.get('accept') || '').includes('text/html')
+        ) {
+          const fallback = await cache.match('/') || await cache.match('/index.html');
+          if (fallback) {
+            return fallback;
+          }
+        }
+
+        return Response.error();
+      })
   );
 });
 
