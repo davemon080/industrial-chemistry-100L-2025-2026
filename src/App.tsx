@@ -117,6 +117,32 @@ export default function App() {
     };
   }, []);
 
+  // Auto-sync Web Push subscription state on App startup and whenever user logs in
+  useEffect(() => {
+    if (currentUser && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.pushManager.getSubscription().then((sub) => {
+          if (sub) {
+            fetch('/api/push-subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                subscription: sub,
+                matricNumber: currentUser.matricNumber
+              })
+            }).catch((err) => {
+              console.warn('[PWA App] Auto-sync silent push setup failure:', err);
+            });
+          }
+        }).catch((err) => {
+          console.warn('[PWA App] Could not get push sub:', err);
+        });
+      }).catch((e) => {
+        console.warn('[PWA App] SW not ready for auto-sync:', e);
+      });
+    }
+  }, [currentUser]);
+
   // Timetable and announcements databases - dynamic fresh connection
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);

@@ -146,8 +146,8 @@ async function startServer() {
   // Web Push API: Save push subscription durably in Firestore
   app.post("/api/push-subscribe", async (req, res) => {
     const { subscription, matricNumber } = req.body;
-    if (!subscription) {
-      return res.status(400).json({ error: "Subscription payload is required." });
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ error: "Subscription payload with endpoint is required." });
     }
 
     if (!db) {
@@ -155,16 +155,42 @@ async function startServer() {
     }
 
     try {
-      const docId = getSafeDocId(matricNumber || `anon-${Date.now()}`);
+      // Create a stable, unique document ID based on the subscription endpoint hash to allow multiple devices/browsers per student
+      const endpointHash = Buffer.from(subscription.endpoint).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(-60);
+      const docId = getSafeDocId(`${matricNumber || "Guest"}-${endpointHash}`);
+
       await setDoc(doc(db, "push-subscriptions", docId), {
         subscription,
         matricNumber: matricNumber || "Guest",
+        endpoint: subscription.endpoint,
         createdAt: new Date().toISOString()
       });
       res.json({ success: true });
     } catch (error: any) {
       console.error("[Server] Subscribe persistence error:", error);
       res.status(500).json({ error: error.message || "Could not save push subscription." });
+    }
+  });
+
+  // Web Push API: Remove push subscription from Firestore
+  app.post("/api/push-unsubscribe", async (req, res) => {
+    const { subscription, matricNumber } = req.body;
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({ error: "Subscription payload with endpoint is required." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Backend database connection is offline." });
+    }
+
+    try {
+      const endpointHash = Buffer.from(subscription.endpoint).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(-60);
+      const docId = getSafeDocId(`${matricNumber || "Guest"}-${endpointHash}`);
+      await deleteDoc(doc(db, "push-subscriptions", docId));
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[Server] Unsubscribe error:", error);
+      res.status(500).json({ error: error.message || "Could not remove subscription." });
     }
   });
 

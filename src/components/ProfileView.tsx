@@ -186,6 +186,19 @@ export default function ProfileView({
       navigator.serviceWorker.ready.then((reg) => {
         reg.pushManager.getSubscription().then((sub) => {
           setIsPushSubscribed(!!sub);
+          // Auto-sync existing subscription to server so it is never lost or pruned by other logins/resets
+          if (sub && user?.matricNumber) {
+            fetch('/api/push-subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                subscription: sub,
+                matricNumber: user.matricNumber
+              })
+            }).catch((err) => {
+              console.warn('[ProfileView] Auto-sync silent push setup failure:', err);
+            });
+          }
         }).catch((err) => {
           console.warn('[ProfileView] Could not fetch current push subscription status:', err);
         });
@@ -272,6 +285,20 @@ export default function ProfileView({
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         if (sub) {
+          // Notify the backend to remove this device's subscription durably from Firestore first
+          try {
+            await fetch('/api/push-unsubscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                subscription: sub,
+                matricNumber: user?.matricNumber || 'Guest'
+              })
+            });
+          } catch (backendErr) {
+            console.warn('[WebPush] Silent backend unsubscribe request failed:', backendErr);
+          }
+
           await sub.unsubscribe();
           setIsPushSubscribed(false);
           console.log('[WebPush] Unsubscribed active subscription.');
