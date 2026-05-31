@@ -79,3 +79,10 @@ body {
   color: #f8fafc;
   font-family: var(--font-sans);
 }
+
+/* Prevent iOS & general mobile auto zoom when focusing input/textarea/select elements by enforcing a 16px minimum font size */
+@media screen and (max-width: 768px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}

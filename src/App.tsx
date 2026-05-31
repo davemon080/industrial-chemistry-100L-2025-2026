@@ -491,6 +491,35 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // Session concurrency safety: Listen to changes in user profile document on Firestore.
+  // If activeSessionId changes online to not match the current device session ID, log the account out.
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let deviceSessionId = localStorage.getItem('ich100l_session_id');
+    if (!deviceSessionId) {
+      deviceSessionId = 'sess_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+      localStorage.setItem('ich100l_session_id', deviceSessionId);
+    }
+
+    const docRef = doc(db, 'users', getSafeDocId(currentUser.matricNumber));
+    const unsubscribeSession = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data && data.activeSessionId && data.activeSessionId !== deviceSessionId) {
+          console.warn('[Session] Session conflict detected. Another device signed in. Logging out...');
+          alert('This student account has been signed in on a different device. You have been automatically logged out.');
+          setCurrentUser(null);
+          localStorage.removeItem('ich100l_user');
+        }
+      }
+    }, (error) => {
+      console.warn('[Session] Concurrency listener lookup skipped:', error);
+    });
+
+    return () => unsubscribeSession();
+  }, [currentUser]);
+
   const handleUpdateSubStatus = () => {
     if (!currentUser) return;
     try {

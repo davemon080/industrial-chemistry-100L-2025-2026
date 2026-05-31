@@ -42,7 +42,7 @@ const saveUserToDB = (user: any) => {
 };
 
 interface LoginScreenProps {
-  onLoginSuccess: (user: { email: string; matricNumber: string; name: string; createdAt?: string }) => void;
+  onLoginSuccess: (user: { email: string; matricNumber: string; name: string; createdAt?: string; activeSessionId?: string }) => void;
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
@@ -69,6 +69,13 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
     const cleanedMatric = validateMatric(matricNumber);
 
+    // Ensure we have a persistent local device/session ID to check concurrency
+    let sessionId = localStorage.getItem('ich100l_session_id');
+    if (!sessionId) {
+      sessionId = 'sess_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+      localStorage.setItem('ich100l_session_id', sessionId);
+    }
+
     try {
       // 1. Check online Firestore DB
       const docRef = doc(db, 'users', getSafeDocId(cleanedMatric));
@@ -80,14 +87,21 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           setError('Incorrect password for this matriculation number.');
           return;
         }
-        // Sync cache
-        saveUserToDB(userData);
-        onLoginSuccess({
+
+        // Overwrite the online session ID so only this active device is authenticated
+        await setDoc(docRef, { activeSessionId: sessionId }, { merge: true });
+
+        const finalUser = {
           email: userData.email,
           matricNumber: userData.matricNumber,
           name: userData.name,
           createdAt: userData.createdAt,
-        });
+          activeSessionId: sessionId,
+        };
+
+        // Sync cache
+        saveUserToDB(finalUser);
+        onLoginSuccess(finalUser);
         return;
       }
     } catch (err) {
@@ -103,11 +117,20 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         setError('Incorrect password for this matriculation number.');
         return;
       }
+
+      // Try syncing online session id in background even if login initially loaded offline
+      try {
+        await setDoc(doc(db, 'users', getSafeDocId(cleanedMatric)), { activeSessionId: sessionId }, { merge: true });
+      } catch (errSync) {
+        console.warn('[Session] Silent background session ID sync missed:', errSync);
+      }
+
       onLoginSuccess({
         email: existingUser.email,
         matricNumber: existingUser.matricNumber,
         name: existingUser.name,
         createdAt: existingUser.createdAt,
+        activeSessionId: sessionId,
       });
     } else {
       // Setup dynamic account if they use course rep matric representing fresh first login
@@ -118,6 +141,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           name: 'David Adebayo',
           password: password,
           createdAt: new Date().toISOString(),
+          activeSessionId: sessionId,
         };
         try {
           await setDoc(doc(db, 'users', getSafeDocId(cleanedMatric)), defaultRep);
@@ -130,6 +154,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           matricNumber: defaultRep.matricNumber,
           name: defaultRep.name,
           createdAt: defaultRep.createdAt,
+          activeSessionId: sessionId,
         });
       } else {
         setError('Matric number is not registered yet. Please click "Don\'t have an account?" above to register.');
@@ -147,6 +172,13 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     }
 
     const cleanedMatric = validateMatric(matricNumber);
+
+    // Generate session ID
+    let sessionId = localStorage.getItem('ich100l_session_id');
+    if (!sessionId) {
+      sessionId = 'sess_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+      localStorage.setItem('ich100l_session_id', sessionId);
+    }
 
     try {
       const docRef = doc(db, 'users', getSafeDocId(cleanedMatric));
@@ -171,6 +203,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       name: name.trim(),
       password: password,
       createdAt: new Date().toISOString(),
+      activeSessionId: sessionId,
     };
 
     try {
@@ -186,6 +219,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       matricNumber: newUser.matricNumber,
       name: newUser.name,
       createdAt: newUser.createdAt,
+      activeSessionId: sessionId,
     });
   };
 
@@ -249,7 +283,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. David Adebayo"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base focus:outline-none focus:border-indigo-500 transition-colors"
                   />
                 </div>
               </div>
@@ -265,7 +299,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="e.g. student@ich100l.edu"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
             </div>
@@ -283,7 +317,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   value={matricNumber}
                   onChange={(e) => setMatricNumber(e.target.value)}
                   placeholder="e.g. 2025/ps/ich/1000"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
             </div>
@@ -298,7 +332,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base focus:outline-none focus:border-indigo-500 transition-colors"
                 />
                 <button
                   type="button"
