@@ -222,8 +222,8 @@ export default function ProfileView({
         const title = 'Alerts Active! 🔔';
         const options = {
           body: 'Popup alerts are now set up. You will receive notifications of new schedules, broadcasts, and module uploads from the Course Rep!',
-          icon: '/logo.svg',
-          badge: '/logo.svg'
+          icon: '/logo-192.png',
+          badge: '/logo-192.png'
         };
 
         if ('serviceWorker' in navigator) {
@@ -712,8 +712,8 @@ export default function ProfileView({
           Settings & Preferences
         </h3>
 
-        {/* Android PWA Dynamic Native App Installer Banner */}
-        {deferredPrompt && (
+        {/* PWA App Installer Banner / Advice */}
+        {deferredPrompt ? (
           <div className="p-4 rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/25 to-slate-900/40 space-y-3 shadow-[0_4px_24px_rgba(99,102,241,0.15)]">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-indigo-950/80 text-indigo-400 border border-indigo-550/20">
@@ -743,6 +743,25 @@ export default function ProfileView({
               </button>
             </div>
           </div>
+        ) : (
+          !isPWA && !isIOS && (
+            <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/20 space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <Smartphone className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <h4 className="text-xs font-sans font-semibold text-slate-200">How to Install on Android Phone 📲</h4>
+                  <p className="text-[11px] text-slate-400 font-sans leading-relaxed">
+                    If you haven't installed the app as a true standalone application yet, you can do so manually:
+                  </p>
+                  <ol className="list-decimal list-inside text-[11px] text-slate-400 font-sans space-y-1 mt-1.5 pl-0.5 leading-relaxed">
+                    <li>Tap the standard <strong className="text-slate-200">three-dot menu</strong> icon in the top right of Chrome.</li>
+                    <li>Select <strong className="text-emerald-400">Install app</strong> (or <strong className="text-emerald-400">Add to Home screen</strong>).</li>
+                    <li>Confirm the install popup to have a high-performance app (not just a shortcut).</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          )
         )}
 
         {/* Device Popup Alerts Preferences Panel */}

@@ -3,14 +3,14 @@
  * Standard offline-ready installation, network pass-through, and Web Push notifications
  */
 
-const CACHE_NAME = 'ich100l-cache-v2';
+const CACHE_NAME = 'ich100l-cache-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/logo.svg',
   '/logo-192.png',
-  '/logo-512.png'
+  '/logo-512.png',
+  '/logo.svg'
 ];
 
 self.addEventListener('install', (event) => {
@@ -69,38 +69,44 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Intercept standard static assets & pages
+  // Intercept standard layout & HTML navigation pages for Offline fallback
+  if (event.request.mode === 'navigate' || (event.request.headers.get('accept') || '').includes('text/html')) {
+    event.respondWith(
+      fetch(event.request)
+        .catch(async () => {
+          const cache = await caches.open(CACHE_NAME);
+          const cachedResponse = await cache.match('/') || await cache.match('/index.html');
+          return cachedResponse || Response.error();
+        })
+    );
+    return;
+  }
+
+  // Let browser make standard request online, fallback to cache if offline (Cache first with Network update)
   event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
-        // Keep a clone of successful stylesheet/image fetches in cache
-        if (networkResponse.ok && event.request.destination === 'image') {
-          const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return networkResponse;
-      })
-      .catch(async () => {
-        // Fallback options when device offline
-        const cache = await caches.open(CACHE_NAME);
-        const cachedResponse = await cache.match(event.request);
-        if (cachedResponse) {
-          return cachedResponse;
-        }
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        // Fetch fresh version in background to update cache
+        fetch(event.request)
+          .then((networkResponse) => {
+            if (networkResponse.ok) {
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
+            }
+          })
+          .catch(() => {});
+        return cachedResponse;
+      }
 
-        // If it's a browser layout/navigation request, return cached root/index shell
-        if (
-          event.request.mode === 'navigate' || 
-          (event.request.headers.get('accept') || '').includes('text/html')
-        ) {
-          const fallback = await cache.match('/') || await cache.match('/index.html');
-          if (fallback) {
-            return fallback;
+      return fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse.ok && (event.request.destination === 'image' || event.request.destination === 'font')) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
-        }
-
-        return Response.error();
-      })
+          return networkResponse;
+        })
+        .catch(() => Response.error());
+    })
   );
 });
 
@@ -125,8 +131,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: '/logo.svg',
-    badge: '/logo.svg',
+    icon: '/logo-192.png',
+    badge: '/logo-192.png',
     vibrate: [200, 100, 200],
     tag: data.id || `ich-${Date.now()}`,
     data: {
