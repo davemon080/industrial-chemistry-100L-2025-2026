@@ -13,6 +13,7 @@ import ImageViewer from './ImageViewer';
 interface DeadlinesProps {
   deadlines: Deadline[];
   isCourseRep: boolean;
+  currentUserMatric: string;
   onToggleComplete: (id: string) => void;
   onDeleteDeadline: (id: string) => void;
 }
@@ -20,6 +21,7 @@ interface DeadlinesProps {
 export default function Deadlines({
   deadlines,
   isCourseRep,
+  currentUserMatric,
   onToggleComplete,
   onDeleteDeadline
 }: DeadlinesProps) {
@@ -28,7 +30,13 @@ export default function Deadlines({
   const [closedPreviews, setClosedPreviews] = useState<Record<string, boolean>>({});
   const [deadlineToDelete, setDeadlineToDelete] = useState<Deadline | null>(null);
 
-  const filteredDeadlines = deadlines.filter((dl) => {
+  // Map deadlines to overwrite isCompleted with user's specific state
+  const userDeadlines = deadlines.map(dl => ({
+    ...dl,
+    isCompleted: dl.completedBy ? !!dl.completedBy[currentUserMatric] : dl.isCompleted
+  }));
+
+  const filteredDeadlines = userDeadlines.filter((dl) => {
     if (filter === 'pending') return !dl.isCompleted;
     if (filter === 'completed') return dl.isCompleted;
     return true;
@@ -89,7 +97,7 @@ export default function Deadlines({
     }
   };
 
-  const pendingCount = deadlines.filter(d => !d.isCompleted).length;
+  const pendingCount = userDeadlines.filter(d => !d.isCompleted).length;
 
   return (
     <div className="space-y-6">

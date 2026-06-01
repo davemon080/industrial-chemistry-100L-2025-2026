@@ -163,6 +163,49 @@ export default function App() {
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
+  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
+    try {
+      const stored = localStorage.getItem('ich100l_notifications');
+      if (stored) return JSON.parse(stored);
+      
+      const defaults: NotificationItem[] = [
+        {
+          id: 'notif-1',
+          type: 'announcement',
+          title: 'Practical Handbook Distributed',
+          body: 'Collect physical guides and worksheets for ICH100L from course assistants at administrative center.',
+          time: '2 hours ago',
+          isRead: false,
+          priority: 'medium',
+          referenceTab: 'announcements'
+        },
+        {
+          id: 'notif-2',
+          type: 'deadline',
+          title: 'Salt Analysis Worksheet Submission',
+          body: 'Course Rep posted lab sheet schema submission workspace details. Click details to check prompt guidelines.',
+          time: '5 hours ago',
+          isRead: false,
+          priority: 'high',
+          referenceTab: 'deadlines'
+        },
+        {
+          id: 'notif-3',
+          type: 'schedule',
+          title: 'Introductory Lab Safety Lecture',
+          body: 'Syllabus coordinator scheduled physical lecture in main auditorium. Check Monday timeline.',
+          time: '1 day ago',
+          isRead: true,
+          priority: 'info',
+          referenceTab: 'schedule'
+        }
+      ];
+      return defaults;
+    } catch {
+      return [];
+    }
+  });
+
   // Listen to subscription status in real-time
   const [subStatus, setSubStatus] = useState<'loading' | 'active' | 'inactive'>('loading');
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
@@ -551,9 +594,9 @@ export default function App() {
 
   // One-time initialization to clear any previously seeded default activities from the archive bin
   useEffect(() => {
-    if (!localStorage.getItem('ich100l_bin_cleared_v2')) {
+    if (!localStorage.getItem('ich100l_bin_cleared_v4')) {
       localStorage.removeItem('ich100l_deleted_activities');
-      localStorage.setItem('ich100l_bin_cleared_v2', 'true');
+      localStorage.setItem('ich100l_bin_cleared_v4', 'true');
       window.dispatchEvent(new Event('ich100l_deleted_activities_updated'));
     }
   }, []);
@@ -561,6 +604,11 @@ export default function App() {
   // Wipes all preloaded defaults and enforces automatic weekly rollover (partitioning past/future)
   useEffect(() => {
     if (!currentUser) return;
+
+    // Safety check: ONLY the Course Representative is authorized to execute database rollovers and resets!
+    // This absolutely prevents race conditions and timezone mismatches of standard students from wiping other users' data.
+    const isRep = currentUser.matricNumber === DEFAULT_COURSE_REP_MATRIC;
+    if (!isRep) return;
 
     const wipeAndSeedIfNewWeek = async () => {
       try {
@@ -657,47 +705,40 @@ export default function App() {
   // Listen to Firestore real-time updates for activities
   useEffect(() => {
     if (!currentUser) return;
+    const knownIds = new Set<string>();
     let isInitial = true;
     const unsubscribe = onSnapshot(collection(db, 'activities'), (snapshot) => {
       const docs: Activity[] = [];
       snapshot.forEach((doc) => {
         docs.push({ ...doc.data(), id: doc.id } as Activity);
+        if (isInitial) {
+          knownIds.add(doc.id);
+        }
       });
 
       if (!isInitial) {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const data = change.doc.data() as Activity;
-            if (data.createdBy !== currentUser.matricNumber) {
-              const notif: NotificationItem = {
-                id: `notif-act-${Date.now()}-${change.doc.id}`,
-                type: 'schedule',
-                title: 'New Class Scheduled 📅',
-                body: `${data.courseCode || 'ICH100L'}: "${data.title}" is scheduled on ${data.day} from ${data.timeStart} to ${data.timeEnd}.`,
-                time: 'Just now',
-                isRead: false,
-                priority: 'info',
-                referenceTab: 'schedule'
-              };
-              setNotifications((prev) => {
-                if (prev.some(p => p.id === notif.id)) return prev;
-                return [notif, ...prev];
-              });
-            }
-          } else if (change.type === 'modified') {
-            const data = change.doc.data() as Activity;
-            if (data.createdBy !== currentUser.matricNumber) {
-              const notif: NotificationItem = {
-                id: `notif-act-mod-${Date.now()}-${change.doc.id}`,
-                type: 'schedule',
-                title: 'Class Schedule Updated 📝',
-                body: `${data.courseCode || 'ICH100L'}: "${data.title}" on ${data.day} has been updated.`,
-                time: 'Just now',
-                isRead: false,
-                priority: 'medium',
-                referenceTab: 'schedule'
-              };
-              setNotifications((prev) => [notif, ...prev]);
+            const docId = change.doc.id;
+            if (!knownIds.has(docId)) {
+              knownIds.add(docId);
+              if (data.createdBy !== currentUser.matricNumber) {
+                const notif: NotificationItem = {
+                  id: `notif-act-${Date.now()}-${change.doc.id}`,
+                  type: 'schedule',
+                  title: 'New Class Scheduled 📅',
+                  body: `${data.courseCode || 'ICH100L'}: "${data.title}" is scheduled on ${data.day} from ${data.timeStart} to ${data.timeEnd}.`,
+                  time: 'Just now',
+                  isRead: false,
+                  priority: 'info',
+                  referenceTab: 'schedule'
+                };
+                setNotifications((prev) => {
+                  if (prev.some(p => p.id === notif.id)) return prev;
+                  return [notif, ...prev];
+                });
+              }
             }
           } else if (change.type === 'removed') {
             const data = { ...change.doc.data(), id: change.doc.id } as Activity;
@@ -730,62 +771,40 @@ export default function App() {
   // Listen to Firestore real-time updates for deadlines
   useEffect(() => {
     if (!currentUser) return;
+    const knownIds = new Set<string>();
     let isInitial = true;
     const unsubscribe = onSnapshot(collection(db, 'deadlines'), (snapshot) => {
       const docs: Deadline[] = [];
       snapshot.forEach((doc) => {
         docs.push({ ...doc.data(), id: doc.id } as Deadline);
+        if (isInitial) {
+          knownIds.add(doc.id);
+        }
       });
 
       if (!isInitial) {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const data = change.doc.data() as Deadline;
-            if (data.createdBy !== currentUser.matricNumber) {
-              const notif: NotificationItem = {
-                id: `notif-dl-${Date.now()}-${change.doc.id}`,
-                type: 'deadline',
-                title: `Assignment Published: ${data.courseCode} 📣`,
-                body: `New deadline: "${data.title}". Due date: ${data.dueDate}.`,
-                time: 'Just now',
-                isRead: false,
-                priority: 'high',
-                referenceTab: 'deadlines'
-              };
-              setNotifications((prev) => {
-                if (prev.some(p => p.id === notif.id)) return prev;
-                return [notif, ...prev];
-              });
-            }
-          } else if (change.type === 'modified') {
-            const data = change.doc.data() as Deadline;
-            if (data.createdBy !== currentUser.matricNumber) {
-              const notif: NotificationItem = {
-                id: `notif-dl-mod-${Date.now()}-${change.doc.id}`,
-                type: 'deadline',
-                title: `Assignment Revision: ${data.courseCode} 📝`,
-                body: `Deadline details for "${data.title}" have been updated.`,
-                time: 'Just now',
-                isRead: false,
-                priority: 'medium',
-                referenceTab: 'deadlines'
-              };
-              setNotifications((prev) => [notif, ...prev]);
-            }
-          } else if (change.type === 'removed') {
-            const data = change.doc.data() as Deadline;
-            if (data.createdBy !== currentUser.matricNumber) {
-              const notif: NotificationItem = {
-                id: `notif-dl-rem-${Date.now()}-${change.doc.id}`,
-                type: 'deadline',
-                title: `Assignment Removed: ${data.courseCode} 🗑️`,
-                body: `The deadline for "${data.title}" has been deleted.`,
-                time: 'Just now',
-                isRead: false,
-                priority: 'info',
-                referenceTab: 'deadlines'
-              };
-              setNotifications((prev) => [notif, ...prev]);
+            const docId = change.doc.id;
+            if (!knownIds.has(docId)) {
+              knownIds.add(docId);
+              if (data.createdBy !== currentUser.matricNumber) {
+                const notif: NotificationItem = {
+                  id: `notif-dl-${Date.now()}-${change.doc.id}`,
+                  type: 'deadline',
+                  title: `Assignment Published: ${data.courseCode} 📣`,
+                  body: `New deadline: "${data.title}". Due date: ${data.dueDate}.`,
+                  time: 'Just now',
+                  isRead: false,
+                  priority: 'high',
+                  referenceTab: 'deadlines'
+                };
+                setNotifications((prev) => {
+                  if (prev.some(p => p.id === notif.id)) return prev;
+                  return [notif, ...prev];
+                });
+              }
             }
           }
         });
@@ -802,65 +821,41 @@ export default function App() {
   // Listen to Firestore real-time updates for announcements
   useEffect(() => {
     if (!currentUser) return;
+    const knownIds = new Set<string>();
     let isInitial = true;
     const unsubscribe = onSnapshot(collection(db, 'announcements'), (snapshot) => {
       const docs: Announcement[] = [];
       snapshot.forEach((doc) => {
         docs.push({ ...doc.data(), id: doc.id } as Announcement);
+        if (isInitial) {
+          knownIds.add(doc.id);
+        }
       });
 
       if (!isInitial) {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
             const data = change.doc.data() as Announcement;
+            const docId = change.doc.id;
             const isMe = data.author?.includes(currentUser.name);
-            if (!isMe) {
-              const notif: NotificationItem = {
-                id: `notif-ann-${Date.now()}-${change.doc.id}`,
-                type: 'announcement',
-                title: `Urgent Course Broadcaster 🚨`,
-                body: `"${data.title}": ${data.content.substring(0, 70)}${data.content.length > 70 ? '...' : ''}`,
-                time: 'Just now',
-                isRead: false,
-                priority: (data.priority as any) || 'medium',
-                referenceTab: 'announcements'
-              };
-              setNotifications((prev) => {
-                if (prev.some(p => p.id === notif.id)) return prev;
-                return [notif, ...prev];
-              });
-            }
-          } else if (change.type === 'modified') {
-            const data = change.doc.data() as Announcement;
-            const isMe = data.author?.includes(currentUser.name);
-            if (!isMe) {
-              const notif: NotificationItem = {
-                id: `notif-ann-mod-${Date.now()}-${change.doc.id}`,
-                type: 'announcement',
-                title: `Broadcast Broadcast Updated 📣`,
-                body: `"${data.title}" was updated in real-time.`,
-                time: 'Just now',
-                isRead: false,
-                priority: (data.priority as any) || 'medium',
-                referenceTab: 'announcements'
-              };
-              setNotifications((prev) => [notif, ...prev]);
-            }
-          } else if (change.type === 'removed') {
-            const data = change.doc.data() as Announcement;
-            const isMe = data.author?.includes(currentUser.name);
-            if (!isMe) {
-              const notif: NotificationItem = {
-                id: `notif-ann-rem-${Date.now()}-${change.doc.id}`,
-                type: 'announcement',
-                title: `Broadcast Removed 🗑️`,
-                body: `"${data.title}" notice was deleted.`,
-                time: 'Just now',
-                isRead: false,
-                priority: 'info',
-                referenceTab: 'announcements'
-              };
-              setNotifications((prev) => [notif, ...prev]);
+            if (!knownIds.has(docId)) {
+              knownIds.add(docId);
+              if (!isMe) {
+                const notif: NotificationItem = {
+                  id: `notif-ann-${Date.now()}-${change.doc.id}`,
+                  type: 'announcement',
+                  title: `Urgent Course Broadcaster 🚨`,
+                  body: `"${data.title}": ${data.content.substring(0, 70)}${data.content.length > 70 ? '...' : ''}`,
+                  time: 'Just now',
+                  isRead: false,
+                  priority: (data.priority as any) || 'medium',
+                  referenceTab: 'announcements'
+                };
+                setNotifications((prev) => {
+                  if (prev.some(p => p.id === notif.id)) return prev;
+                  return [notif, ...prev];
+                });
+              }
             }
           }
         });
@@ -874,86 +869,111 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Listen to Firestore real-time updates for nested course PDF modules
+  // Periodic background check for live classes, ended classes, and deadline reminders with zero redundant notifications
   useEffect(() => {
     if (!currentUser) return;
-    let isInitial = true;
-    const q = query(collectionGroup(db, 'pdf-modules'));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!isInitial) {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const data = change.doc.data() as any;
-            if (data.createdBy !== currentUser.matricNumber) {
-              const notif: NotificationItem = {
-                id: `notif-pdf-${Date.now()}-${change.doc.id}`,
-                type: 'announcement',
-                title: 'New PDF Handbook Uploaded 📚',
-                body: `Resource Available: "${data.title}" has been successfully distributed by the Course Rep. Tap to view.`,
-                time: 'Just now',
-                isRead: false,
-                priority: 'medium',
-                referenceTab: 'modules'
-              };
-              setNotifications((prev) => {
-                if (prev.some(p => p.id === notif.id)) return prev;
-                return [notif, ...prev];
-              });
-            }
-          }
-        });
-      }
-      isInitial = false;
-    }, (error) => {
-      console.warn('Firestore listening to collection group pdf-modules failed:', error);
-    });
 
-    return () => unsubscribe();
-  }, [currentUser]);
-
-  const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
-    try {
-      const stored = localStorage.getItem('ich100l_notifications');
-      if (stored) return JSON.parse(stored);
+    const runChecks = () => {
+      const now = new Date();
+      const WEEKDAY_NAMES: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const currentDayName = WEEKDAY_NAMES[now.getDay()];
       
-      const defaults: NotificationItem[] = [
-        {
-          id: 'notif-1',
-          type: 'announcement',
-          title: 'Practical Handbook Distributed',
-          body: 'Collect physical guides and worksheets for ICH100L from course assistants at administrative center.',
-          time: '2 hours ago',
-          isRead: false,
-          priority: 'medium',
-          referenceTab: 'announcements'
-        },
-        {
-          id: 'notif-2',
-          type: 'deadline',
-          title: 'Salt Analysis Worksheet Submission',
-          body: 'Course Rep posted lab sheet schema submission workspace details. Click details to check prompt guidelines.',
-          time: '5 hours ago',
-          isRead: false,
-          priority: 'high',
-          referenceTab: 'deadlines'
-        },
-        {
-          id: 'notif-3',
-          type: 'schedule',
-          title: 'Introductory Lab Safety Lecture',
-          body: 'Syllabus coordinator scheduled physical lecture in main auditorium. Check Monday timeline.',
-          time: '1 day ago',
-          isRead: true,
-          priority: 'info',
-          referenceTab: 'schedule'
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const todayDateStr = `${yyyy}-${mm}-${dd}`;
+
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+      // 1. Check for Live Classes and Ended Classes
+      activities.forEach((act) => {
+        // Must match either today's specific date or today's repeating weekday
+        const isToday = act.date ? (act.date === todayDateStr) : (act.day === currentDayName);
+        if (!isToday) return;
+
+        const [startH, startM] = act.timeStart.split(':').map(Number);
+        const [endH, endM] = act.timeEnd.split(':').map(Number);
+        const startMinutes = startH * 60 + startM;
+        const endMinutes = endH * 60 + endM;
+
+        const liveNotifId = `live-${act.id}-${todayDateStr}`;
+        const endedNotifId = `ended-${act.id}-${todayDateStr}`;
+
+        if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+          // Class is currently live standard
+          const alreadyNotifiedLive = notifications.some(n => n.id === liveNotifId);
+          if (!alreadyNotifiedLive) {
+            const notif: NotificationItem = {
+              id: liveNotifId,
+              type: 'schedule',
+              title: `Live Class Activated! 🟢`,
+              body: `"${act.courseCode}: ${act.title}" is currently live and active in ${act.location}!`,
+              time: 'Just now',
+              isRead: false,
+              priority: 'high',
+              referenceTab: 'schedule'
+            };
+            setNotifications(prev => [notif, ...prev]);
+          }
+        } else if (currentMinutes >= endMinutes) {
+          // Class has ended
+          const alreadyNotifiedEnded = notifications.some(n => n.id === endedNotifId);
+          const wasNotifiedLive = notifications.some(n => n.id === liveNotifId);
+          
+          if (!alreadyNotifiedEnded && wasNotifiedLive) {
+            const notif: NotificationItem = {
+              id: endedNotifId,
+              type: 'schedule',
+              title: `Class Ended 🛑`,
+              body: `"${act.courseCode}: ${act.title}" session has officially finished.`,
+              time: 'Just now',
+              isRead: false,
+              priority: 'info',
+              referenceTab: 'schedule'
+            };
+            setNotifications(prev => [notif, ...prev]);
+          }
         }
-      ];
-      return defaults;
-    } catch {
-      return [];
-    }
-  });
+      });
+
+      // 2. Check for Near Deadline Reminders
+      deadlines.forEach((dl) => {
+        // Skip if marked complete by current user
+        const isCompleted = dl.completedBy ? !!dl.completedBy[currentUser.matricNumber] : dl.isCompleted;
+        if (isCompleted) return;
+
+        const dueTime = new Date(dl.dueDate).getTime();
+        const todayTime = new Date(todayDateStr).getTime();
+        const diffMs = dueTime - todayTime;
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        if (diffDays > 0 && diffDays <= 3) {
+          const reminderId = `reminder-${dl.id}-${todayDateStr}-${diffDays}`;
+          const alreadyReminded = notifications.some(n => n.id === reminderId);
+          if (!alreadyReminded) {
+            const notif: NotificationItem = {
+              id: reminderId,
+              type: 'deadline',
+              title: `Upcoming Deadline Notice ⏰`,
+              body: `Reminder: "${dl.courseCode}: ${dl.title}" is due in ${diffDays} ${diffDays === 1 ? 'day' : 'days'} (${dl.dueDate}).`,
+              time: 'Just now',
+              isRead: false,
+              priority: 'high',
+              referenceTab: 'deadlines'
+            };
+            setNotifications(prev => [notif, ...prev]);
+          }
+        }
+      });
+    };
+
+    // Run first check immediately
+    runChecks();
+
+    const interval = setInterval(runChecks, 30000); // Check every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [currentUser, activities, deadlines, notifications]);
 
   // UI state managers
   const [activeTab, setActiveTab] = useState<any>('schedule');
@@ -1140,17 +1160,22 @@ export default function App() {
   // Deadline management actions
   const handleToggleDeadline = async (id: string) => {
     const target = deadlines.find((d) => d.id === id);
-    if (target) {
-      const nextCompleted = !target.isCompleted;
+    if (target && currentUser) {
+      const userMatric = currentUser.matricNumber;
+      const completedBy = target.completedBy || {};
+      const currentCompleted = completedBy[userMatric] ?? target.isCompleted;
+      const nextCompleted = !currentCompleted;
+      
+      const newCompletedBy = { ...completedBy, [userMatric]: nextCompleted };
       try {
-        await setDoc(doc(db, 'deadlines', id), cleanData({ isCompleted: nextCompleted }), { merge: true });
+        await setDoc(doc(db, 'deadlines', id), { completedBy: newCompletedBy }, { merge: true });
       } catch (err) {
         console.error('Error toggling deadline:', err);
       }
+      setDeadlines((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, completedBy: newCompletedBy } : d))
+      );
     }
-    setDeadlines((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, isCompleted: !d.isCompleted } : d))
-    );
   };
 
   const handleAddDeadline = async (newDl: Omit<Deadline, 'id' | 'isCompleted' | 'createdBy'>) => {
@@ -1349,6 +1374,7 @@ export default function App() {
           <Deadlines
             deadlines={deadlines}
             isCourseRep={isCourseRep}
+            currentUserMatric={currentUser?.matricNumber || ''}
             onToggleComplete={handleToggleDeadline}
             onDeleteDeadline={handleDeleteDeadline}
           />
@@ -1381,8 +1407,8 @@ export default function App() {
                 }
                 return true;
               }).length,
-              pendingDeadlines: deadlines.filter((d) => !d.isCompleted).length,
-              completedDeadlines: deadlines.filter((d) => d.isCompleted).length,
+              pendingDeadlines: deadlines.filter((d) => !(d.completedBy?.[currentUser?.matricNumber || ''] ?? d.isCompleted)).length,
+              completedDeadlines: deadlines.filter((d) => (d.completedBy?.[currentUser?.matricNumber || ''] ?? d.isCompleted)).length,
               announcementCount: announcements.length
             }}
             subStatus={subStatus}

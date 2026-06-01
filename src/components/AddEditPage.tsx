@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, Check, AlertTriangle, Clock, MapPin, Globe, Sparkles, PlusCircle, Camera, Upload, Trash2, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check, AlertTriangle, Clock, MapPin, Globe, Sparkles, PlusCircle, Camera, Upload, Trash2, Loader2, Calendar, RefreshCw } from 'lucide-react';
 import { DayOfWeek, ActivityCategory, Activity, Deadline, Announcement } from '../types';
 
 const compressImage = (file: File): Promise<File> => {
@@ -116,6 +116,12 @@ export default function AddEditPage({
   const [actDelivery, setActDelivery] = useState<'physical' | 'online'>('physical');
   const [actLink, setActLink] = useState('');
   const [actDate, setActDate] = useState(initialDate);
+  const [actRepeat, setActRepeat] = useState<'none' | 'weekly'>(() => {
+    if (initialDate || (editActivity && editActivity.date)) {
+      return 'none';
+    }
+    return 'weekly';
+  });
 
   // Deadline fields state
   const [dlTitle, setDlTitle] = useState('');
@@ -208,10 +214,17 @@ export default function AddEditPage({
         return;
       }
 
+      if (actRepeat === 'none' && !actDate) {
+        setFormError('For non-repeating (does not repeat) schedules, a specific Schedule Date is required.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const finalDate = actRepeat === 'none' ? (actDate || undefined) : undefined;
       let finalDay = actDay;
-      if (actDate) {
+      if (finalDate) {
         const WEEKDAY_NAMES: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const [year, month, day] = actDate.split('-').map(Number);
+        const [year, month, day] = finalDate.split('-').map(Number);
         const d = new Date(year, month - 1, day);
         finalDay = WEEKDAY_NAMES[d.getDay()];
       }
@@ -227,7 +240,7 @@ export default function AddEditPage({
         description: actDesc.trim() || undefined,
         deliveryType: actDelivery,
         classLink: actDelivery === 'online' ? actLink.trim() : undefined,
-        date: actDate || undefined
+        date: finalDate
       };
 
       if (isEditing && editActivity) {
@@ -439,48 +452,91 @@ export default function AddEditPage({
                 </div>
               </div>
 
-              {/* Date selection field */}
+              {/* Repeat Days / Frequency */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-sans">
-                  Schedule Date (Prefilled for specific calendar events)
+                  Repeat Days / Frequency
                 </label>
-                <input
-                  type="date"
-                  value={actDate}
-                  onChange={(e) => {
-                    const newDate = e.target.value;
-                    setActDate(newDate);
-                    if (newDate) {
-                      const WEEKDAY_NAMES: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                      const [year, month, day] = newDate.split('-').map(Number);
-                      const d = new Date(year, month - 1, day);
-                      setActDay(WEEKDAY_NAMES[d.getDay()]);
-                    }
-                  }}
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-mono"
-                />
+                <div className="grid grid-cols-2 gap-3 p-1 rounded-xl bg-slate-950/80 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActRepeat('none');
+                    }}
+                    className={`py-2 rounded-lg text-xs font-medium font-sans flex items-center justify-center gap-1.5 transition-all cursor-pointer border-none outline-none ${
+                      actRepeat === 'none'
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Does Not Repeat</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActRepeat('weekly');
+                      setActDate(''); // Clear date for repeating weekly events
+                    }}
+                    className={`py-2 rounded-lg text-xs font-medium font-sans flex items-center justify-center gap-1.5 transition-all cursor-pointer border-none outline-none ${
+                      actRepeat === 'weekly'
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Weekly Repeating</span>
+                  </button>
+                </div>
               </div>
 
+              {/* Date selection field */}
+              {actRepeat === 'none' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-sans">
+                    Schedule Date
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={actDate}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      setActDate(newDate);
+                      if (newDate) {
+                        const WEEKDAY_NAMES: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                        const [year, month, day] = newDate.split('-').map(Number);
+                        const d = new Date(year, month - 1, day);
+                        setActDay(WEEKDAY_NAMES[d.getDay()]);
+                      }
+                    }}
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                  />
+                </div>
+              )}
+
               {/* Target Timetable Days */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-sans">
-                  Target Weekday {actDate ? '(Calculated automatically from Date)' : '(Weekly Repeating Day)'}
-                </label>
-                <select
-                  value={actDay}
-                  onChange={(e) => setActDay(e.target.value as DayOfWeek)}
-                  disabled={!!actDate}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="Monday">Monday</option>
-                  <option value="Tuesday">Tuesday</option>
-                  <option value="Wednesday">Wednesday</option>
-                  <option value="Thursday">Thursday</option>
-                  <option value="Friday">Friday</option>
-                  <option value="Saturday">Saturday</option>
-                  <option value="Sunday">Sunday</option>
-                </select>
-              </div>
+              {actRepeat === 'weekly' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-sans">
+                    Target Weekday
+                  </label>
+                  <select
+                    value={actDay}
+                    onChange={(e) => setActDay(e.target.value as DayOfWeek)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                  >
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                    <option value="Sunday">Sunday</option>
+                  </select>
+                </div>
+              )}
 
               {/* Start time & End time */}
               <div className="grid grid-cols-2 gap-4">

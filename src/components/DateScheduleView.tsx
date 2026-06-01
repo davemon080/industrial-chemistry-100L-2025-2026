@@ -298,9 +298,20 @@ export default function DateScheduleView({
             {/* Locally deleted registry schedules section */}
             {deletedSchedules.length > 0 && (
               <div className="space-y-3 pt-2">
-                <h3 className="text-[10px] uppercase font-mono tracking-widest text-rose-400 font-bold px-1 flex items-center gap-1">
-                  <span>Recovered Trash Storage ({deletedSchedules.length})</span>
-                </h3>
+                <div className="flex justify-between items-center px-1">
+                  <h3 className="text-[10px] uppercase font-mono tracking-widest text-rose-400 font-bold flex items-center gap-1">
+                    <span>Recovered Trash Storage ({deletedSchedules.length})</span>
+                  </h3>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('ich100l_deleted_activities');
+                      window.dispatchEvent(new Event('ich100l_deleted_activities_updated'));
+                    }}
+                    className="text-[10px] text-rose-400 hover:text-rose-300 font-mono font-bold hover:underline cursor-pointer bg-transparent border-none outline-none"
+                  >
+                    Clear Trash
+                  </button>
+                </div>
                 {deletedSchedules.map((activity) => (
                   <div key={`deleted-${activity.id}`}>
                     <GlassCard className="border-l-2 border-l-rose-500/40 bg-rose-950/5 hover:bg-rose-950/10 transition-all duration-200">

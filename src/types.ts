@@ -41,6 +41,7 @@ export interface Deadline {
   createdBy: string; // Matric number of creator
   imageUrl?: string;
   imageUrls?: string[];
+  completedBy?: Record<string, boolean>;
 }
 
 export interface Announcement {
