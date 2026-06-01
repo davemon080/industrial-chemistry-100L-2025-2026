@@ -281,13 +281,23 @@ export default function ProfileView({
                   });
 
                   console.log('[WebPush Debug] Subscription established successfully! Raw endpoint:', sub.endpoint);
-                  console.log('[WebPush Debug] Stringified JSON:', JSON.stringify(sub));
+                  
+                  const rawSubJSON = sub.toJSON();
+                  const serializedSub = {
+                    endpoint: sub.endpoint || rawSubJSON.endpoint,
+                    expirationTime: sub.expirationTime || rawSubJSON.expirationTime || null,
+                    keys: {
+                      p256dh: rawSubJSON.keys?.p256dh || '',
+                      auth: rawSubJSON.keys?.auth || ''
+                    }
+                  };
+                  console.log('[WebPush Debug] Explicitly Serialized JSON:', JSON.stringify(serializedSub));
 
                   const registerRes = await fetch('/api/push-subscribe', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      subscription: sub,
+                      subscription: serializedSub,
                       matricNumber: user?.matricNumber || 'Guest'
                     })
                   });

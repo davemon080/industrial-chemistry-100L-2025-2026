@@ -147,14 +147,29 @@ self.addEventListener('push', (event) => {
 
   console.log('[PWA SW] Triggering showNotification via self.registration instance. Title:', data.title, 'Options:', options);
 
-  event.waitUntil(
-    self.registration.showNotification(data.title, options)
+  const notificationPromise = self.registration.showNotification(data.title, options)
+    .then(() => {
+      console.log('[PWA SW] showNotification completed successfully.');
+    })
+    .catch((err) => {
+      console.error('[PWA SW] showNotification failed with error:', err);
+    });
+
+  let badgePromise = Promise.resolve();
+  if (self.navigator && 'setAppBadge' in self.navigator) {
+    const badgeCount = (data && typeof data.badgeCount === 'number') ? data.badgeCount : 1;
+    console.log('[PWA SW] Setting background launcher badge to:', badgeCount);
+    badgePromise = self.navigator.setAppBadge(badgeCount)
       .then(() => {
-        console.log('[PWA SW] showNotification completed successfully.');
+        console.log('[PWA SW] Badge updated successfully on launcher.');
       })
       .catch((err) => {
-        console.error('[PWA SW] showNotification failed with error:', err);
-      })
+        console.warn('[PWA SW] App badge set failed:', err);
+      });
+  }
+
+  event.waitUntil(
+    Promise.all([notificationPromise, badgePromise])
   );
 });
 

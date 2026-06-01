@@ -152,11 +152,20 @@ export default function App() {
       navigator.serviceWorker.ready.then((reg) => {
         reg.pushManager.getSubscription().then((sub) => {
           if (sub) {
+            const rawSubJSON = sub.toJSON();
+            const serializedSub = {
+              endpoint: sub.endpoint || rawSubJSON.endpoint,
+              expirationTime: sub.expirationTime || rawSubJSON.expirationTime || null,
+              keys: {
+                p256dh: rawSubJSON.keys?.p256dh || '',
+                auth: rawSubJSON.keys?.auth || ''
+              }
+            };
             fetch('/api/push-subscribe', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                subscription: sub,
+                subscription: serializedSub,
                 matricNumber: currentUser.matricNumber
               })
             }).catch((err) => {
@@ -1051,6 +1060,20 @@ export default function App() {
       }
     }
     lastNotificationsCountRef.current = notifications.length;
+
+    // Sync Home Screen App Badge (iOS Safari and Android compatible Badging API)
+    if ('setAppBadge' in navigator) {
+      const activeUnreadCount = notifications.filter((notif) => !notif.isRead).length;
+      if (activeUnreadCount > 0) {
+        navigator.setAppBadge(activeUnreadCount).catch((err) => {
+          console.warn('[PWA Client] Failed to set launcher badge count:', err);
+        });
+      } else {
+        navigator.clearAppBadge().catch((err) => {
+          console.warn('[PWA Client] Failed to clear launcher badge count:', err);
+        });
+      }
+    }
   }, [notifications]);
 
   // Sync to localStorage on updates
