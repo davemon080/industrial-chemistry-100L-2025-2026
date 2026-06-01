@@ -64,6 +64,17 @@ service cloud.firestore {
       }
     }
 
+    // Collection group rules for nested PDF modules
+    match /{path=**}/pdf-modules/{moduleId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(moduleId);
+    }
+
+    // Push Config stable metadata rules
+    match /push-config/{configId} {
+      allow read, write: if true;
+    }
+
     // Push Subscriptions collection
     match /push-subscriptions/{subscriptionId} {
       allow read, write: if true;

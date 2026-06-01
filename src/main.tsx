@@ -4,7 +4,15 @@ const originalConsoleError = console.error;
 console.error = (...args: any[]) => {
   const argString = args.map(arg => {
     try {
-      return typeof arg === 'string' ? arg : JSON.stringify(arg);
+      if (arg instanceof Error) {
+        return `${arg.name}: ${arg.message}\n${arg.stack}`;
+      }
+      if (arg && typeof arg === 'object') {
+        const msg = arg.message || arg.description || '';
+        const code = arg.code || '';
+        return `${msg} ${code} ${JSON.stringify(arg)}`;
+      }
+      return String(arg);
     } catch {
       return '';
     }
