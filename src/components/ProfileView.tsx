@@ -86,8 +86,15 @@ const saveUserToDB = (user: any) => {
 };
 
 const urlBase64ToUint8Array = (base64String: string) => {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding)
+  // Deep clean base64 string to handle any strange JSON formatting, extra quotes, whitespaces, or line breaks
+  const cleanBase64String = base64String
+    .trim()
+    .replace(/["']/g, '') // strip potential quotes from JSON responses
+    .replace(/\s/g, '')   // strip any whitespaces or line breaks
+    .replace(/=/g, '');   // strip existing padding characters to recalculate they are correct
+
+  const padding = '='.repeat((4 - cleanBase64String.length % 4) % 4);
+  const base64 = (cleanBase64String + padding)
     .replace(/\-/g, '+')
     .replace(/_/g, '/');
 
