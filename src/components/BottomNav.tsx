@@ -12,9 +12,18 @@ interface BottomNavProps {
   onChangeTab: (tab: TabType) => void;
   isCourseRep: boolean;
   id?: string;
+  deadlinesBadge?: number;
+  broadcastsBadge?: number;
 }
 
-export default function BottomNav({ currentTab, onChangeTab, isCourseRep, id }: BottomNavProps) {
+export default function BottomNav({
+  currentTab,
+  onChangeTab,
+  isCourseRep,
+  id,
+  deadlinesBadge = 0,
+  broadcastsBadge = 0
+}: BottomNavProps) {
   const navItems = [
     {
       id: 'schedule' as TabType,
@@ -58,6 +67,16 @@ export default function BottomNav({ currentTab, onChangeTab, isCourseRep, id }: 
               onClick={() => onChangeTab(item.id)}
               className="relative flex flex-col items-center justify-center py-1 px-2 transition-all duration-300 rounded-xl outline-none"
             >
+              {item.id === 'deadlines' && deadlinesBadge > 0 && !isActive && (
+                <span className="absolute -top-1 right-2 bg-rose-500 text-white font-sans text-[9px] font-bold h-4 min-w-[16px] px-1 rounded-full flex items-center justify-center animate-pulse z-10 shadow-[0_0_8px_rgba(244,63,94,0.6)]">
+                  {deadlinesBadge}
+                </span>
+              )}
+              {item.id === 'announcements' && broadcastsBadge > 0 && !isActive && (
+                <span className="absolute -top-1 right-2 bg-rose-500 text-white font-sans text-[9px] font-bold h-4 min-w-[16px] px-1 rounded-full flex items-center justify-center animate-pulse z-10 shadow-[0_0_8px_rgba(244,63,94,0.6)]">
+                  {broadcastsBadge}
+                </span>
+              )}
               <div
                 className={`flex items-center justify-center p-1.5 rounded-lg transition-all duration-300 ${
                   isActive

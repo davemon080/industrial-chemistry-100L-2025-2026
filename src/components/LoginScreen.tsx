@@ -46,13 +46,12 @@ interface LoginScreenProps {
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
-  const [isRegistering, setIsRegistering] = useState(false);
   const [email, setEmail] = useState('');
   const [matricNumber, setMatricNumber] = useState('');
-  const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   const validateMatric = (nm: string) => {
     return nm.trim();
@@ -61,9 +60,11 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsAuthenticating(true);
 
     if (!email || !matricNumber || !password) {
       setError('Please fill in all requested credentials.');
+      setIsAuthenticating(false);
       return;
     }
 
@@ -85,6 +86,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         const userData = docSnap.data();
         if (userData.password !== password) {
           setError('Incorrect password for this matriculation number.');
+          setIsAuthenticating(false);
           return;
         }
 
@@ -102,6 +104,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         // Sync cache
         saveUserToDB(finalUser);
         onLoginSuccess(finalUser);
+        setIsAuthenticating(false);
         return;
       }
     } catch (err) {
@@ -115,6 +118,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     if (existingUser) {
       if (existingUser.password !== password) {
         setError('Incorrect password for this matriculation number.');
+        setIsAuthenticating(false);
         return;
       }
 
@@ -132,6 +136,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         createdAt: existingUser.createdAt,
         activeSessionId: sessionId,
       });
+      setIsAuthenticating(false);
     } else {
       // Setup dynamic account if they use course rep matric representing fresh first login
       if (cleanedMatric === DEFAULT_COURSE_REP_MATRIC) {
@@ -156,71 +161,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           createdAt: defaultRep.createdAt,
           activeSessionId: sessionId,
         });
+        setIsAuthenticating(false);
       } else {
-        setError('Matric number is not registered yet. Please click "Don\'t have an account?" above to register.');
+        setError('Matric number is not registered on this system. Please contact the administrator to register your credentials.');
+        setIsAuthenticating(false);
       }
     }
-  };
-
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-
-    if (!email || !matricNumber || !name || !password) {
-      setError('All registration fields are required.');
-      return;
-    }
-
-    const cleanedMatric = validateMatric(matricNumber);
-
-    // Generate session ID
-    let sessionId = localStorage.getItem('ich100l_session_id');
-    if (!sessionId) {
-      sessionId = 'sess_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
-      localStorage.setItem('ich100l_session_id', sessionId);
-    }
-
-    try {
-      const docRef = doc(db, 'users', getSafeDocId(cleanedMatric));
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setError('An account with this matriculation number is already registered.');
-        return;
-      }
-    } catch (err) {
-      console.warn('Online check failed, checking offline cache:', err);
-    }
-
-    const localDB = getUsersDB();
-    if (localDB[cleanedMatric]) {
-      setError('An account with this matriculation number is already registered.');
-      return;
-    }
-
-    const newUser = {
-      email: email.trim(),
-      matricNumber: cleanedMatric,
-      name: name.trim(),
-      password: password,
-      createdAt: new Date().toISOString(),
-      activeSessionId: sessionId,
-    };
-
-    try {
-      await setDoc(doc(db, 'users', getSafeDocId(cleanedMatric)), newUser);
-    } catch (err) {
-      console.error(err);
-    }
-
-    saveUserToDB(newUser);
-
-    onLoginSuccess({
-      email: newUser.email,
-      matricNumber: newUser.matricNumber,
-      name: newUser.name,
-      createdAt: newUser.createdAt,
-      activeSessionId: sessionId,
-    });
   };
 
   return (
@@ -251,17 +197,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-display font-bold text-slate-100">
-              {isRegistering ? 'Create Student Account' : 'Portal Access Sign-in'}
+              Portal Access Sign-in
             </h2>
-            <button
-              onClick={() => {
-                setIsRegistering(!isRegistering);
-                setError('');
-              }}
-              className="text-xs text-indigo-400 font-medium hover:underline focus:outline-none"
-            >
-              {isRegistering ? 'Already have an account?' : "Don't have an account?"}
-            </button>
           </div>
 
           {error && (
@@ -271,24 +208,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             </div>
           )}
 
-          <form onSubmit={isRegistering ? handleRegister : handleLogin} className="space-y-4">
-            {isRegistering && (
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5 font-sans">Full Name</label>
-                <div className="relative">
-                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. David Adebayo"
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base focus:outline-none focus:border-indigo-500 transition-colors"
-                  />
-                </div>
-              </div>
-            )}
-
+          <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1.5 font-sans">Institutional Email</label>
               <div className="relative">
@@ -296,10 +216,11 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <input
                   type="email"
                   required
+                  disabled={isAuthenticating}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="e.g. student@ich100l.edu"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-50"
                 />
               </div>
             </div>
@@ -314,10 +235,11 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <input
                   type="text"
                   required
+                  disabled={isAuthenticating}
                   value={matricNumber}
                   onChange={(e) => setMatricNumber(e.target.value)}
                   placeholder="e.g. 2025/ps/ich/1000"
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-50"
                 />
               </div>
             </div>
@@ -329,15 +251,17 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
+                  disabled={isAuthenticating}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-base focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-50"
                 />
                 <button
                   type="button"
+                  disabled={isAuthenticating}
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 focus:outline-none cursor-pointer"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 focus:outline-none cursor-pointer disabled:opacity-50"
                   title={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="w-4.5 h-4.5" /> : <Eye className="w-4.5 h-4.5" />}
@@ -347,9 +271,10 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
             <button
               type="submit"
-              className="w-full py-3 mt-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-[0_4px_12px_rgba(99,102,241,0.25)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.4)] transition-all"
+              disabled={isAuthenticating}
+              className="w-full py-3 mt-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-[0_4px_12px_rgba(99,102,241,0.25)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.4)] transition-all disabled:opacity-50"
             >
-              <span>{isRegistering ? 'Register & Access Portal' : 'Authenticate Credentials'}</span>
+              <span>{isAuthenticating ? 'Authenticating...' : 'Authenticate Credentials'}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>

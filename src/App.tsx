@@ -1014,6 +1014,23 @@ export default function App() {
 
   // UI state managers
   const [activeTab, setActiveTab] = useState<any>('schedule');
+
+  // Automatically clear unread notifications when relevant tab is selected by user
+  useEffect(() => {
+    if (activeTab === 'deadlines') {
+      setNotifications(prev => {
+        const hasUnread = prev.some(n => n.type === 'deadline' && !n.isRead);
+        if (!hasUnread) return prev;
+        return prev.map(n => n.type === 'deadline' ? { ...n, isRead: true } : n);
+      });
+    } else if (activeTab === 'announcements') {
+      setNotifications(prev => {
+        const hasUnread = prev.some(n => n.type === 'announcement' && !n.isRead);
+        if (!hasUnread) return prev;
+        return prev.map(n => n.type === 'announcement' ? { ...n, isRead: true } : n);
+      });
+    }
+  }, [activeTab]);
   const [daySelected, setDaySelected] = useState<DayOfWeek>(() => {
     const days: DayOfWeek[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     return days[new Date().getDay()];
@@ -1800,6 +1817,8 @@ export default function App() {
         currentTab={activeTab}
         onChangeTab={setActiveTab}
         isCourseRep={isCourseRep}
+        deadlinesBadge={notifications.filter(n => n.type === 'deadline' && !n.isRead).length}
+        broadcastsBadge={notifications.filter(n => n.type === 'announcement' && !n.isRead).length}
       />
     </div>
   );
