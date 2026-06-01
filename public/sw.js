@@ -112,6 +112,8 @@ self.addEventListener('fetch', (event) => {
 
 // Handle real background Web Push events when the app is completely closed
 self.addEventListener('push', (event) => {
+  console.log('[PWA SW] Push event received:', event);
+
   let data = { 
     title: 'ICH 100L Alerts 🔔', 
     body: 'New live update from your Course Representative.' 
@@ -120,12 +122,14 @@ self.addEventListener('push', (event) => {
   if (event.data) {
     try {
       data = event.data.json();
+      console.log('[PWA SW] Parsed JSON push payload:', data);
     } catch (e) {
       // Fallback if payload is plain text
       data = { 
         title: 'ICH 100L Announcements 📢', 
         body: event.data.text() 
       };
+      console.log('[PWA SW] Parsed plain text push payload:', data);
     }
   }
 
@@ -141,8 +145,16 @@ self.addEventListener('push', (event) => {
     }
   };
 
+  console.log('[PWA SW] Triggering showNotification via self.registration instance. Title:', data.title, 'Options:', options);
+
   event.waitUntil(
     self.registration.showNotification(data.title, options)
+      .then(() => {
+        console.log('[PWA SW] showNotification completed successfully.');
+      })
+      .catch((err) => {
+        console.error('[PWA SW] showNotification failed with error:', err);
+      })
   );
 });
 

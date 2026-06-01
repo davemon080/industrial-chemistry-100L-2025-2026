@@ -229,33 +229,54 @@ export default function ProfileView({
         if ('serviceWorker' in navigator) {
           navigator.serviceWorker.ready
             .then(async (reg) => {
-              reg.showNotification(title, options);
+              console.log('[WebPush Debug] Core Service Worker is ready for notification dispatch.');
+              
+              // Trigger showNotification by the serviceWorker instance explicitly for high-fidelity iOS PWA support
+              try {
+                await reg.showNotification(title, options);
+                console.log('[WebPush Debug] Success: Triggered showNotification via Service Worker registration instance.');
+              } catch (notifErr) {
+                console.warn('[WebPush Debug] Direct SW registration showNotification failed:', notifErr);
+                // Fallback to standard constructor
+                try {
+                  new Notification(title, options);
+                } catch (constructorErr) {
+                  console.error('[WebPush Debug] Standard constructor fallback failed too:', constructorErr);
+                }
+              }
               
               // Call background subscription setup
               try {
+                console.log('[WebPush Debug] Fetching stable VAPID public key from backend...');
                 const keyRes = await fetch('/api/vapid-public-key');
                 const keyData = await keyRes.json();
+                console.log('[WebPush Debug] Successfully fetched public key data:', keyData);
                 
                 if (keyData?.publicKey) {
+                  console.log('[WebPush Debug] Parsing base64 VAPID Key into Uint8Array...');
                   const applicationServerKey = urlBase64ToUint8Array(keyData.publicKey);
                   
                   // Resilient check: always clear any old, stale, or key-mismatched registration in this browser first to avoid registration key clash exceptions
                   try {
                     const existingSub = await reg.pushManager.getSubscription();
                     if (existingSub) {
-                      console.log('[WebPush] Clean state reset: unsubscribing existing client registration before registering stable keys.');
+                      console.log('[WebPush Debug] Clean state reset: unsubscribing existing client registration before registering new keys:', existingSub.endpoint);
                       await existingSub.unsubscribe();
                     }
                   } catch (eSub) {
-                    console.warn('[WebPush] Error clearing existing pre-subscription:', eSub);
+                    console.warn('[WebPush Debug] Warning clearing existing pre-subscription:', eSub);
                   }
 
+                  console.log('[WebPush Debug] Registering a fresh PushManager subscription with userVisibleOnly: true...');
                   const sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey
                   });
 
-                  await fetch('/api/push-subscribe', {
+                  console.log('[WebPush Debug] Subscription established successfully! Raw endpoint:', sub.endpoint);
+                  console.log('[WebPush Debug] Stringified JSON:', JSON.stringify(sub));
+
+                  const registerRes = await fetch('/api/push-subscribe', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -263,19 +284,26 @@ export default function ProfileView({
                       matricNumber: user?.matricNumber || 'Guest'
                     })
                   });
+                  
+                  const registerResult = await registerRes.json();
+                  console.log('[WebPush Debug] Backend synchronized successfully. Response:', registerResult);
+                  
                   setIsPushSubscribed(true);
-                  console.log('[WebPush] Registered and saved to Firestore push subscriptions.');
+                  console.log('[WebPush Debug] iOS/PWA push notification registration fully complete and saved to Firestore.');
+                } else {
+                  console.error('[WebPush Debug] Aborted: VAPID public key payload is empty or invalid.');
                 }
-              } catch (pushErr) {
-                console.error('[WebPush] Registration failed:', pushErr);
+              } catch (pushErr: any) {
+                console.error('[WebPush Debug] Push registration process failed with error:', pushErr);
+                alert(`Web Push Setup Error: ${pushErr.message || pushErr}. On iOS Safari, make sure to add this app to your Home Screen first!`);
               }
             })
             .catch((err) => {
-              console.warn('SW notification failed, falling back:', err);
+              console.warn('[WebPush Debug] Service worker was not ready:', err);
               try {
                 new Notification(title, options);
               } catch (e) {
-                console.error('Standard constructor failed:', e);
+                console.error('[WebPush Debug] Standard constructor direct fallback failed:', e);
               }
             });
         } else {

@@ -44,6 +44,20 @@ function getMondayOfCurrentWeek(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+// Checks if a custom document ID signifies an element created recently (within last 5 minutes)
+function isRecentlyCreatedCustomId(id: string): boolean {
+  if (!id) return false;
+  const parts = id.split('-');
+  if (parts.length >= 3 && (parts[0] === 'dl' || parts[0] === 'act' || parts[0] === 'ann') && parts[1] === 'custom') {
+    const timestamp = parseInt(parts[2], 10);
+    if (!isNaN(timestamp)) {
+      const diff = Date.now() - timestamp;
+      return diff >= 0 && diff <= 300000; // 5 minutes window
+    }
+  }
+  return false;
+}
+
 const triggerPushNotification = async (title: string, body: string, category: string) => {
   try {
     await fetch('/api/send-broadcast-push', {
@@ -594,9 +608,9 @@ export default function App() {
 
   // One-time initialization to clear any previously seeded default activities from the archive bin
   useEffect(() => {
-    if (!localStorage.getItem('ich100l_bin_cleared_v4')) {
+    if (!localStorage.getItem('ich100l_bin_cleared_v5')) {
       localStorage.removeItem('ich100l_deleted_activities');
-      localStorage.setItem('ich100l_bin_cleared_v4', 'true');
+      localStorage.setItem('ich100l_bin_cleared_v5', 'true');
       window.dispatchEvent(new Event('ich100l_deleted_activities_updated'));
     }
   }, []);
@@ -723,7 +737,8 @@ export default function App() {
             const docId = change.doc.id;
             if (!knownIds.has(docId)) {
               knownIds.add(docId);
-              if (data.createdBy !== currentUser.matricNumber) {
+              // Only trigger visual notifications inside the app if the activity is recently created (and not by current user)
+              if (data.createdBy !== currentUser.matricNumber && isRecentlyCreatedCustomId(docId)) {
                 const notif: NotificationItem = {
                   id: `notif-act-${Date.now()}-${change.doc.id}`,
                   type: 'schedule',
@@ -789,7 +804,8 @@ export default function App() {
             const docId = change.doc.id;
             if (!knownIds.has(docId)) {
               knownIds.add(docId);
-              if (data.createdBy !== currentUser.matricNumber) {
+              // Only trigger visual notifications inside the app if the deadline is recently created (and not by current user)
+              if (data.createdBy !== currentUser.matricNumber && isRecentlyCreatedCustomId(docId)) {
                 const notif: NotificationItem = {
                   id: `notif-dl-${Date.now()}-${change.doc.id}`,
                   type: 'deadline',
@@ -840,7 +856,8 @@ export default function App() {
             const isMe = data.author?.includes(currentUser.name);
             if (!knownIds.has(docId)) {
               knownIds.add(docId);
-              if (!isMe) {
+              // Only trigger visual notifications inside the app if the announcement is recently created (and not by current user)
+              if (!isMe && isRecentlyCreatedCustomId(docId)) {
                 const notif: NotificationItem = {
                   id: `notif-ann-${Date.now()}-${change.doc.id}`,
                   type: 'announcement',
@@ -1011,21 +1028,23 @@ export default function App() {
           if ('serviceWorker' in navigator) {
             navigator.serviceWorker.ready
               .then((reg) => {
+                console.log('[WebPush Sync Debug] Dispatching local notification via service worker showNotification:', title, options);
                 reg.showNotification(title, options);
               })
               .catch((err) => {
-                console.warn('SW notification failed in alert sync, falling back:', err);
+                console.warn('[WebPush Sync Debug] Service Worker notification fell back to standard constructor:', err);
                 try {
                   new Notification(title, options);
                 } catch (e) {
-                  console.error('Core constructor fallback failed:', e);
+                  console.error('[WebPush Sync Debug] Constructor fallback error:', e);
                 }
               });
           } else {
+            console.log('[WebPush Sync Debug] Service Worker not supported; using standard Notification constructor:', title);
             try {
               new Notification(title, options);
             } catch (e) {
-              console.error('Core constructor direct launch failed:', e);
+              console.error('[WebPush Sync Debug] Direct constructor launch failed:', e);
             }
           }
         }
