@@ -101,6 +101,21 @@ export default function App() {
     }
   });
 
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Install capability matching
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -1592,6 +1607,12 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            {!isOnline && (
+              <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-xl animate-pulse flex items-center gap-1.5 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                <span>Offline</span>
+              </span>
+            )}
             {/* User state preview badge inside header */}
             <div className="flex items-center gap-2 bg-slate-950/40 border border-slate-800/80 p-1.0 pr-3 rounded-2xl">
               <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-sans font-bold select-none ${

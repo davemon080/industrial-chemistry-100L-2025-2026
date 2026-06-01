@@ -5,7 +5,7 @@ import multer from "multer";
 import { createServer as createViteServer } from "vite";
 import webpush from "web-push";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } from "firebase/firestore";
+import { getFirestore, collection, getDocs, getDoc, setDoc, doc, deleteDoc } from "firebase/firestore";
 
 // Setup Firebase client instance on server matching firebase-applet-config
 let db: any = null;
@@ -38,36 +38,93 @@ function getSafeDocId(id: string): string {
   return id.trim().replace(/\//g, "-");
 }
 
-// Persist / load VAPID Keys dynamically so push subscription is not invalidated on restarts
-const vapidPath = path.join(process.cwd(), "vapid-keys.json");
-let vapidKeys: { publicKey: string; privateKey: string };
+// Persist / load VAPID Keys dynamically using Firestore as the primary stable master key storage
+// This blocks session/subscription invalidation across stateless container updates and cold-starts on Cloud Run.
+let vapidKeys: { publicKey: string; privateKey: string } | null = null;
 
-if (fs.existsSync(vapidPath)) {
-  try {
-    vapidKeys = JSON.parse(fs.readFileSync(vapidPath, "utf-8"));
-  } catch (err) {
-    console.error("[Server] Failed to read existing VAPID keys, generating new ones...");
+async function ensureVapidKeys() {
+  if (vapidKeys) return vapidKeys;
+
+  const vapidPath = path.join(process.cwd(), "vapid-keys.json");
+
+  // Phase 1: Try reading from durably synchronized Cloud Firestore
+  if (db) {
+    try {
+      console.log("[Server] Fetching stable VAPID keys from Firestore...");
+      const configDoc = await getDoc(doc(db, "push-config", "vapid"));
+      if (configDoc.exists()) {
+        const data = configDoc.data();
+        if (data && data.publicKey && data.privateKey) {
+          vapidKeys = {
+            publicKey: data.publicKey,
+            privateKey: data.privateKey
+          };
+          console.log("[Server] Successfully loaded stable VAPID keys from Firestore.");
+          webpush.setVapidDetails(
+            "mailto:daveimagodei@gmail.com",
+            vapidKeys.publicKey,
+            vapidKeys.privateKey
+          );
+          return vapidKeys;
+        }
+      }
+    } catch (fbError) {
+      console.warn("[Server] Silent Firestore lookup query missed, falling back to FS:", fbError);
+    }
+  }
+
+  // Phase 2: Fallback to existing local configuration file
+  if (fs.existsSync(vapidPath)) {
+    try {
+      vapidKeys = JSON.parse(fs.readFileSync(vapidPath, "utf-8"));
+      console.log("[Server] Loaded VAPID keys from persistent file system.");
+    } catch (err) {
+      console.error("[Server] Local VAPID schema load failed, re-generating...");
+      vapidKeys = webpush.generateVAPIDKeys();
+      fs.writeFileSync(vapidPath, JSON.stringify(vapidKeys), "utf-8");
+    }
+  } else {
+    console.log("[Server] Generating fresh Master VAPID Keypairs...");
     vapidKeys = webpush.generateVAPIDKeys();
-    fs.writeFileSync(vapidPath, JSON.stringify(vapidKeys), "utf-8");
+    try {
+      fs.writeFileSync(vapidPath, JSON.stringify(vapidKeys), "utf-8");
+    } catch (err) {
+      console.error("[Server] VAPID persistence output file failed:", err);
+    }
   }
-} else {
-  vapidKeys = webpush.generateVAPIDKeys();
-  try {
-    fs.writeFileSync(vapidPath, JSON.stringify(vapidKeys), "utf-8");
-  } catch (err) {
-    console.error("[Server] Failed to persist generated VAPID keys:", err);
-  }
-}
 
-webpush.setVapidDetails(
-  "mailto:daveimagodei@gmail.com",
-  vapidKeys.publicKey,
-  vapidKeys.privateKey
-);
+  // Phase 3: Save newly synthesized stable key configuration back into Cloud Firestore
+  if (db && vapidKeys) {
+    try {
+      console.log("[Server] Syncing fresh stable keys to Firestore cloud configuration...");
+      await setDoc(doc(db, "push-config", "vapid"), {
+        publicKey: vapidKeys.publicKey,
+        privateKey: vapidKeys.privateKey,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (fbSyncError) {
+      console.warn("[Server] Failed to write stable keys to Firestore:", fbSyncError);
+    }
+  }
+
+  webpush.setVapidDetails(
+    "mailto:daveimagodei@gmail.com",
+    vapidKeys.publicKey,
+    vapidKeys.privateKey
+  );
+  return vapidKeys;
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Initialize and load stable VAPID keys from Firestore on boot
+  try {
+    await ensureVapidKeys();
+  } catch (err) {
+    console.error("[Server] Critical startup error: Could not load stable VAPID credentials:", err);
+  }
 
   // Ensure uploads directory exists and is statically served
   const uploadDir = path.join(process.cwd(), "uploads");
@@ -139,8 +196,14 @@ async function startServer() {
   app.use(express.json());
 
   // Web Push API: Serve the VAPID public key
-  app.get("/api/vapid-public-key", (req, res) => {
-    res.json({ publicKey: vapidKeys.publicKey });
+  app.get("/api/vapid-public-key", async (req, res) => {
+    try {
+      const keys = await ensureVapidKeys();
+      res.json({ publicKey: keys.publicKey });
+    } catch (e: any) {
+      console.error("[Server] VAPID keys fetch failing:", e);
+      res.status(500).json({ error: "Push notification credentials not initialized yet." });
+    }
   });
 
   // Web Push API: Save push subscription durably in Firestore

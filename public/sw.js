@@ -129,14 +129,15 @@ self.addEventListener('push', (event) => {
     }
   }
 
+  const baseUrl = self.location.origin || '';
   const options = {
     body: data.body,
-    icon: '/logo-192.png',
-    badge: '/logo-192.png',
+    icon: baseUrl + '/logo-192.png',
+    badge: baseUrl + '/logo-192.png',
     vibrate: [200, 100, 200],
     tag: data.id || `ich-${Date.now()}`,
     data: {
-      url: '/'
+      url: baseUrl + '/'
     }
   };
 
@@ -149,17 +150,28 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   
+  const targetUrl = event.notification.data && event.notification.data.url ? event.notification.data.url : self.location.origin + '/';
+  
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // Focus on an existing open window tab if possible
+      // Focus on an existing open window tab matching the target URL
       for (const client of clientList) {
-        if ('focus' in client) {
+        if (client.url === targetUrl && 'focus' in client) {
           return client.focus();
         }
       }
-      // Otherwise launch a standalone new screen instance
+      // If any client window is open, navigate it to targetUrl and focus
+      for (const client of clientList) {
+        if ('focus' in client) {
+          if ('navigate' in client) {
+            client.navigate(targetUrl);
+          }
+          return client.focus();
+        }
+      }
+      // Otherwise launch a standalone new window/tab instance
       if (self.clients.openWindow) {
-        return self.clients.openWindow('/');
+        return self.clients.openWindow(targetUrl);
       }
     })
   );

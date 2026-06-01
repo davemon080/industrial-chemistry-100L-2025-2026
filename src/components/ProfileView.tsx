@@ -238,6 +238,18 @@ export default function ProfileView({
                 
                 if (keyData?.publicKey) {
                   const applicationServerKey = urlBase64ToUint8Array(keyData.publicKey);
+                  
+                  // Resilient check: always clear any old, stale, or key-mismatched registration in this browser first to avoid registration key clash exceptions
+                  try {
+                    const existingSub = await reg.pushManager.getSubscription();
+                    if (existingSub) {
+                      console.log('[WebPush] Clean state reset: unsubscribing existing client registration before registering stable keys.');
+                      await existingSub.unsubscribe();
+                    }
+                  } catch (eSub) {
+                    console.warn('[WebPush] Error clearing existing pre-subscription:', eSub);
+                  }
+
                   const sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
                     applicationServerKey

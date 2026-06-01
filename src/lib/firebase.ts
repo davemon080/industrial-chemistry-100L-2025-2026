@@ -5,7 +5,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, 
+  initializeFirestore, 
   doc, 
   getDoc, 
   getDocFromServer,
@@ -32,12 +32,14 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, appletConfig.firestoreDatabaseId);
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true
+}, appletConfig.firestoreDatabaseId);
 
 // Test connection on boot to verify correct synchronization
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test-connection-doc-id', 'connection'));
+    await getDocFromServer(doc(db, 'system-config', 'app-branding'));
     console.log("Firebase connection verified and synchronized.");
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {

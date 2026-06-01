@@ -1,3 +1,28 @@
+// Safely intercept and suppress benign Firestore SDK log errors for idle socket closures.
+// These are standard, harmless warnings during periods of inactivity that Firestore handles by automatic reconnection.
+const originalConsoleError = console.error;
+console.error = (...args: any[]) => {
+  const argString = args.map(arg => {
+    try {
+      return typeof arg === 'string' ? arg : JSON.stringify(arg);
+    } catch {
+      return '';
+    }
+  }).join(' ');
+
+  if (
+    argString.includes('Disconnecting idle stream') ||
+    argString.includes('Timed out waiting for new targets') ||
+    argString.includes("GrpcConnection RPC 'Listen'") ||
+    argString.includes('CANCELLED:')
+  ) {
+    // Treat as warning since the Firebase SDK handles reconnection seamlessly
+    console.warn('[Firebase Stream] Note: Idle stream disconnected (handled gracefully by SDK auto-reconnection).');
+    return;
+  }
+  originalConsoleError(...args);
+};
+
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
