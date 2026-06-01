@@ -44,6 +44,11 @@ export default function NotificationsPage({
   onClearNotifications
 }: NotificationsPageProps) {
   
+  // Automatically mark all notifications as received and read when the user views the page
+  useEffect(() => {
+    onMarkAllAsRead();
+  }, [onMarkAllAsRead]);
+
   const unreadCount = notifications.filter(n => !n.isRead).length;
 
   return (

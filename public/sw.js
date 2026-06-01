@@ -140,6 +140,8 @@ self.addEventListener('push', (event) => {
     badge: baseUrl + '/logo-192.png',
     vibrate: [200, 100, 200],
     tag: data.id || `ich-${Date.now()}`,
+    silent: false,
+    sound: 'default',
     data: {
       url: baseUrl + '/'
     }
@@ -156,10 +158,11 @@ self.addEventListener('push', (event) => {
     });
 
   let badgePromise = Promise.resolve();
-  if (self.navigator && 'setAppBadge' in self.navigator) {
+  const badgingAPI = (self.navigator && 'setAppBadge' in self.navigator) ? self.navigator : (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) ? navigator : null;
+  if (badgingAPI) {
     const badgeCount = (data && typeof data.badgeCount === 'number') ? data.badgeCount : 1;
     console.log('[PWA SW] Setting background launcher badge to:', badgeCount);
-    badgePromise = self.navigator.setAppBadge(badgeCount)
+    badgePromise = badgingAPI.setAppBadge(badgeCount)
       .then(() => {
         console.log('[PWA SW] Badge updated successfully on launcher.');
       })

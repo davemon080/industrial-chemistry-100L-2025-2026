@@ -1041,7 +1041,9 @@ export default function App() {
             icon: '/logo.svg',
             badge: '/logo.svg',
             vibrate: [200, 100, 200],
-            tag: latestNotif.id
+            tag: latestNotif.id,
+            silent: false,
+            sound: 'default'
           };
 
           // Try Service Worker showNotification first (iOS/PWA standard)
