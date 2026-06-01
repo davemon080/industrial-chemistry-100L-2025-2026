@@ -30,7 +30,7 @@ import {
 import GlassCard from './GlassCard';
 import { DEFAULT_COURSE_REP_MATRIC } from '../data/defaultData';
 import { db, getSafeDocId } from '../lib/firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 
 // Helper to load Paystack Inline SDK dynamically on demand
 const loadPaystackInProfile = (): Promise<void> => {
@@ -104,6 +104,13 @@ const urlBase64ToUint8Array = (base64String: string) => {
   for (let i = 0; i < rawData.length; ++i) {
     outputArray[i] = rawData.charCodeAt(i);
   }
+
+  // Strictly enforce 65 bytes for uncompressed VAPID public keys to prevent browser-specific parsing errors
+  if (outputArray.length > 65 && outputArray[0] === 0x04) {
+    console.log('[WebPush Debug] Truncating public key to exactly 65 bytes for strict browser compatibility.');
+    return outputArray.slice(0, 65);
+  }
+
   return outputArray;
 };
 
@@ -256,45 +263,104 @@ export default function ProfileView({
               
               // Call background subscription setup
               try {
-                console.log('[WebPush Debug] Fetching stable VAPID public key from backend...');
-                const keyRes = await fetch('/api/vapid-public-key');
-                const keyData = await keyRes.json();
-                console.log('[WebPush Debug] Successfully fetched public key data:', keyData);
+                const FALLBACK_VAPID_PUBLIC_KEY = 'BHBnOpO3flpycaCho3_7hk2ZtTucZxb1K6TnoavpdG-KBy0TciH_qXz8mYS_yZT_AVVAkjA29eBW0uOr83WT6X4';
+                let vapidPublicKey = FALLBACK_VAPID_PUBLIC_KEY;
                 
-                if (keyData?.publicKey) {
-                  console.log('[WebPush Debug] Parsing base64 VAPID Key into Uint8Array...');
-                  const applicationServerKey = urlBase64ToUint8Array(keyData.publicKey);
-                  
-                  // Resilient check: always clear any old, stale, or key-mismatched registration in this browser first to avoid registration key clash exceptions
-                  try {
-                    const existingSub = await reg.pushManager.getSubscription();
-                    if (existingSub) {
-                      console.log('[WebPush Debug] Clean state reset: unsubscribing existing client registration before registering new keys:', existingSub.endpoint);
-                      await existingSub.unsubscribe();
+                try {
+                  console.log('[WebPush Debug] Fetching stable VAPID public key from backend...');
+                  const keyRes = await fetch('/api/vapid-public-key');
+                  if (keyRes.ok) {
+                    const contentType = keyRes.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                      const keyData = await keyRes.json();
+                      if (keyData?.publicKey) {
+                        vapidPublicKey = keyData.publicKey;
+                        console.log('[WebPush Debug] Successfully loaded public key from backend:', vapidPublicKey);
+                      }
+                    } else {
+                      console.warn('[WebPush Debug] Non-JSON content returned from /api/vapid-public-key. Falling back to hardcoded VAPID public key.');
                     }
-                  } catch (eSub) {
-                    console.warn('[WebPush Debug] Warning clearing existing pre-subscription:', eSub);
+                  } else {
+                    console.warn(`[WebPush Debug] Failed to fetch /api/vapid-public-key. Status: ${keyRes.status}. Falling back to hardcoded VAPID public key.`);
                   }
+                } catch (fetchErr) {
+                  console.warn('[WebPush Debug] Error during VAPID public key fetch. Falling back to hardcoded public key:', fetchErr);
+                }
 
-                  console.log('[WebPush Debug] Registering a fresh PushManager subscription with userVisibleOnly: true...');
-                  const sub = await reg.pushManager.subscribe({
+                console.log('[WebPush Debug] Parsing base64 VAPID Key into Uint8Array...');
+                const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
+                
+                // Resilient check: always clear any old, stale, or key-mismatched registration in this browser first to avoid registration key clash exceptions
+                try {
+                  const existingSub = await reg.pushManager.getSubscription();
+                  if (existingSub) {
+                    console.log('[WebPush Debug] Clean state reset: unsubscribing existing client registration before registering new keys:', existingSub.endpoint);
+                    await existingSub.unsubscribe();
+                  }
+                } catch (eSub) {
+                  console.warn('[WebPush Debug] Warning clearing existing pre-subscription:', eSub);
+                }
+
+                console.log('[WebPush Debug] Registering a fresh PushManager subscription...');
+                let sub;
+                try {
+                  sub = await reg.pushManager.subscribe({
                     userVisibleOnly: true,
-                    applicationServerKey
+                    applicationServerKey: applicationServerKey
                   });
-
-                  console.log('[WebPush Debug] Subscription established successfully! Raw endpoint:', sub.endpoint);
+                  console.log('[WebPush Debug] Subscription established with standard Uint8Array.');
+                } catch (subErr: any) {
+                  console.warn('[WebPush Debug] Standard Uint8Array subscription attempt failed, retrying with raw ArrayBuffer fallback for Safari:', subErr);
                   
-                  const rawSubJSON = sub.toJSON();
-                  const serializedSub = {
-                    endpoint: sub.endpoint || rawSubJSON.endpoint,
-                    expirationTime: sub.expirationTime || rawSubJSON.expirationTime || null,
-                    keys: {
-                      p256dh: rawSubJSON.keys?.p256dh || '',
-                      auth: rawSubJSON.keys?.auth || ''
+                  if (applicationServerKey.buffer) {
+                    try {
+                      sub = await reg.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: applicationServerKey.buffer
+                      });
+                      console.log('[WebPush Debug] Subscription established with Safari-specific underlying raw ArrayBuffer.');
+                    } catch (safariErrObj: any) {
+                      console.error('[WebPush Debug] All subscription parameter typing formats failed:', safariErrObj);
+                      throw safariErrObj;
                     }
-                  };
-                  console.log('[WebPush Debug] Explicitly Serialized JSON:', JSON.stringify(serializedSub));
+                  } else {
+                    throw subErr;
+                  }
+                }
 
+                console.log('[WebPush Debug] Subscription established successfully! Raw endpoint:', sub.endpoint);
+                
+                const rawSubJSON = sub.toJSON();
+                const serializedSub = {
+                  endpoint: sub.endpoint || rawSubJSON.endpoint,
+                  expirationTime: sub.expirationTime || rawSubJSON.expirationTime || null,
+                  keys: {
+                    p256dh: rawSubJSON.keys?.p256dh || '',
+                    auth: rawSubJSON.keys?.auth || ''
+                  }
+                };
+                console.log('[WebPush Debug] Explicitly Serialized JSON:', JSON.stringify(serializedSub));
+
+                // 1. Direct cloud sync to Firestore client-side first for extreme PWA reliability
+                const endpointSuffix = (serializedSub.endpoint || '').slice(-50);
+                const subDocId = getSafeDocId(`${user?.matricNumber || 'Guest'}_${endpointSuffix}`);
+                
+                console.log('[WebPush Debug] Writing subscription directly to Firestore:', subDocId);
+                try {
+                  await setDoc(doc(db, 'push-subscriptions', subDocId), {
+                    subscription: serializedSub,
+                    matricNumber: user?.matricNumber || 'Guest',
+                    endpoint: serializedSub.endpoint,
+                    createdAt: new Date().toISOString()
+                  });
+                  console.log('[WebPush Debug] Direct Firestore write successful!');
+                  setIsPushSubscribed(true);
+                } catch (fireStoreErr) {
+                  console.error('[WebPush Debug] Direct client-side Firestore subscription write failed:', fireStoreErr);
+                }
+
+                // 2. Secondary backend sync to keep API structures aligned
+                try {
                   const registerRes = await fetch('/api/push-subscribe', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -304,14 +370,18 @@ export default function ProfileView({
                     })
                   });
                   
-                  const registerResult = await registerRes.json();
-                  console.log('[WebPush Debug] Backend synchronized successfully. Response:', registerResult);
-                  
-                  setIsPushSubscribed(true);
-                  console.log('[WebPush Debug] iOS/PWA push notification registration fully complete and saved to Firestore.');
-                } else {
-                  console.error('[WebPush Debug] Aborted: VAPID public key payload is empty or invalid.');
+                  if (registerRes.ok) {
+                    const registerResult = await registerRes.json();
+                    console.log('[WebPush Debug] Backend synchronized successfully. Response:', registerResult);
+                  } else {
+                    console.warn('[WebPush Debug] Backend subscription synchronization code run warning, status:', registerRes.status);
+                  }
+                } catch (apiErr) {
+                  console.warn('[WebPush Debug] Secondary server API sync failed (relying primarily on direct Firestore subscription sync now):', apiErr);
                 }
+                
+                setIsPushSubscribed(true);
+                console.log('[WebPush Debug] iOS/Android push notification registration fully complete.');
               } catch (pushErr: any) {
                 console.error('[WebPush Debug] Push registration process failed with error:', pushErr);
                 alert(`Web Push Setup Error: ${pushErr.message || pushErr}. On iOS Safari, make sure to add this app to your Home Screen first!`);
@@ -353,7 +423,17 @@ export default function ProfileView({
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         if (sub) {
-          // Notify the backend to remove this device's subscription durably from Firestore first
+          // 1. Direct client-side Firestore unsubscribe
+          const endpointSuffix = (sub.endpoint || '').slice(-50);
+          const subDocId = getSafeDocId(`${user?.matricNumber || 'Guest'}_${endpointSuffix}`);
+          try {
+            await deleteDoc(doc(db, 'push-subscriptions', subDocId));
+            console.log('[WebPush Debug] Deleted push subscription doc directly from Firestore on client:', subDocId);
+          } catch (fireStoreErr) {
+            console.warn('[WebPush Debug] Failed to delete push subscription doc from Firestore client-side:', fireStoreErr);
+          }
+
+          // 2. Secondary backend POST sync
           try {
             await fetch('/api/push-unsubscribe', {
               method: 'POST',
