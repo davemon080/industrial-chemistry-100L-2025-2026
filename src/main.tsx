@@ -39,7 +39,7 @@ import './index.css';
 // Register standard Service Worker to enable PWA installability & iOS popup alerts
 if ('serviceWorker' in navigator && !window.location.host.includes('stackblitz')) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .then(reg => {
         console.log('[PWA] Service Worker registered successfully with scope:', reg.scope);
       })
