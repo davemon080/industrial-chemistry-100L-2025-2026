@@ -160,6 +160,7 @@ export default function ProfileView({
 
   // Notification capabilities checking & iOS alignment handler
   const [permissionStatus, setPermissionStatus] = useState<string>('default');
+  const [isRegisteringPush, setIsRegisteringPush] = useState<boolean>(false);
   const [isIframe, setIsIframe] = useState<boolean>(false);
   const [isIOS, setIsIOS] = useState<boolean>(false);
   const [isPWA, setIsPWA] = useState<boolean>(false);
@@ -221,6 +222,7 @@ export default function ProfileView({
       return;
     }
 
+    setIsRegisteringPush(true);
     try {
       const result = await Notification.requestPermission();
       setPermissionStatus(result);
@@ -313,6 +315,8 @@ export default function ProfileView({
               } catch (pushErr: any) {
                 console.error('[WebPush Debug] Push registration process failed with error:', pushErr);
                 alert(`Web Push Setup Error: ${pushErr.message || pushErr}. On iOS Safari, make sure to add this app to your Home Screen first!`);
+              } finally {
+                setIsRegisteringPush(false);
               }
             })
             .catch((err) => {
@@ -322,6 +326,7 @@ export default function ProfileView({
               } catch (e) {
                 console.error('[WebPush Debug] Standard constructor direct fallback failed:', e);
               }
+              setIsRegisteringPush(false);
             });
         } else {
           try {
@@ -329,15 +334,21 @@ export default function ProfileView({
           } catch (e) {
             console.error('Standard constructor failed:', e);
           }
+          setIsRegisteringPush(false);
         }
+      } else {
+        alert('Notification permission was denied. Please allow notifications in your browser settings to receive alerts.');
+        setIsRegisteringPush(false);
       }
     } catch (err) {
       console.error('Failed to request permission:', err);
+      setIsRegisteringPush(false);
     }
   };
 
   const handleDisableNotifications = async () => {
     if ('serviceWorker' in navigator) {
+      setIsRegisteringPush(true);
       try {
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
@@ -365,6 +376,8 @@ export default function ProfileView({
         alert('Device alerts disabled successfully. You will no longer receive background popups unless you enable them again.');
       } catch (err) {
         console.error('[WebPush] Action to unsubscribe failed:', err);
+      } finally {
+        setIsRegisteringPush(false);
       }
     } else {
       setIsPushSubscribed(false);
@@ -882,77 +895,81 @@ export default function ProfileView({
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-950/60 border border-slate-900">
-                    <div className="space-y-1">
-                      <p className="text-xs font-sans text-slate-400">Current Authorization Status</p>
-                      <div className="flex items-center gap-1.5">
-                        {permissionStatus === 'granted' ? (
-                          isPushSubscribed ? (
-                            <div className="text-emerald-400 text-xs font-sans flex items-center gap-1.5 bg-emerald-950/20 border border-emerald-500/20 px-2.5 py-0.5 rounded">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                              <span>Active / Subscribed</span>
-                            </div>
-                          ) : (
-                            <div className="text-amber-400 text-xs font-sans flex items-center gap-1.5 bg-amber-950/20 border border-amber-500/20 px-2.5 py-0.5 rounded">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                              <span>Muted / Switched Off</span>
-                            </div>
-                          )
-                        ) : permissionStatus === 'denied' ? (
-                          <div className="text-rose-400 text-xs font-sans flex items-center gap-1.5 bg-rose-950/25 border border-rose-500/20 px-2.5 py-0.5 rounded">
-                            <ShieldAlert className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                            <span>Blocked by Browser Settings</span>
-                          </div>
-                        ) : permissionStatus === 'unsupported' ? (
-                          <div className="text-amber-400 text-xs font-sans flex items-center gap-1.5 bg-amber-950/25 border border-amber-500/20 px-2.5 py-0.5 rounded">
-                            <ShieldAlert className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                            <span>Platform Unsupported</span>
-                          </div>
-                        ) : (
-                          <div className="text-slate-400 text-xs font-sans flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded">
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                            <span>Inactive</span>
-                          </div>
-                        )}
+                  <div className="flex flex-col gap-4 p-4 rounded-xl bg-slate-950/60 border border-slate-900">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <p className="text-xs font-sans text-slate-300 font-medium">Push Notification Toggle</p>
+                        <p className="text-[11px] text-slate-500 font-sans leading-relaxed">Turn background and lockscreen alerts on/off</p>
+                      </div>
+                      
+                      <div className="flex items-center gap-3">
+                        {isRegisteringPush ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                        ) : null}
+                        
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={isPushSubscribed && permissionStatus === 'granted'}
+                          disabled={permissionStatus === 'unsupported' || isRegisteringPush}
+                          onClick={
+                            isPushSubscribed && permissionStatus === 'granted'
+                              ? handleDisableNotifications
+                              : handleRequestPermission
+                          }
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                            isPushSubscribed && permissionStatus === 'granted' ? 'bg-indigo-600' : 'bg-slate-800'
+                          } ${(permissionStatus === 'unsupported' || isRegisteringPush) ? 'opacity-40 cursor-not-allowed' : ''}`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                              isPushSubscribed && permissionStatus === 'granted' ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
                       </div>
                     </div>
 
-                    <div>
-                      {/* If notifications are supported, show toggle button */}
-                      {permissionStatus !== 'unsupported' && (
-                        permissionStatus !== 'granted' ? (
-                          <button
-                            onClick={handleRequestPermission}
-                            className="px-4 py-2 text-xs font-bold bg-white hover:bg-slate-100 text-slate-950 rounded-xl transition-all cursor-pointer border-none outline-none flex items-center gap-1"
-                          >
-                            <Bell className="w-3.5 h-3.5 text-indigo-600 animate-bounce" />
-                            <span>Enable Alerts</span>
-                          </button>
-                        ) : isPushSubscribed ? (
-                          <button
-                            onClick={handleDisableNotifications}
-                            className="px-4 py-2 text-xs font-bold bg-rose-950/60 hover:bg-rose-900/60 text-rose-200 border border-rose-800/40 rounded-xl transition-all cursor-pointer outline-none flex items-center gap-1"
-                          >
-                            <BellOff className="w-3.5 h-3.5 text-rose-400" />
-                            <span>Switch Off Alerts</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={handleRequestPermission}
-                            className="px-4 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all cursor-pointer border-none outline-none flex items-center gap-1"
-                          >
-                            <Bell className="w-3.5 h-3.5 text-white animate-pulse" />
-                            <span>Switch On Alerts</span>
-                          </button>
-                        )
-                      )}
+                    <div className="h-px bg-slate-900" />
 
-                      {permissionStatus === 'denied' && (
-                        <span className="text-[10px] text-slate-500 font-sans max-w-[150px] block leading-normal mt-1.5">
-                          Reset site permissions in your browser bar.
-                        </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-sans text-slate-500">Current Status:</span>
+                      
+                      {permissionStatus === 'granted' ? (
+                        isPushSubscribed ? (
+                          <div className="text-emerald-400 text-[10px] font-mono tracking-wide font-bold uppercase flex items-center gap-1.5 bg-emerald-950/45 border border-emerald-500/20 px-2.5 py-0.5 rounded-full animate-fade-in">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span>Enabled</span>
+                          </div>
+                        ) : (
+                          <div className="text-amber-400 text-[10px] font-mono tracking-wide font-bold uppercase flex items-center gap-1.5 bg-amber-950/45 border border-amber-500/20 px-2.5 py-0.5 rounded-full animate-fade-in">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                            <span>Disabled</span>
+                          </div>
+                        )
+                      ) : permissionStatus === 'denied' ? (
+                        <div className="text-rose-400 text-[10px] font-mono tracking-wide font-bold uppercase flex items-center gap-1.5 bg-rose-950/45 border border-rose-500/20 px-2.5 py-0.5 rounded-full">
+                          <ShieldAlert className="w-3 h-3 text-rose-500 shrink-0" />
+                          <span>Blocked by Browser</span>
+                        </div>
+                      ) : permissionStatus === 'unsupported' ? (
+                        <div className="text-amber-400 text-[10px] font-mono tracking-wide font-bold uppercase flex items-center gap-1.5 bg-amber-950/45 border border-amber-500/20 px-2.5 py-0.5 rounded-full">
+                          <ShieldAlert className="w-3 h-3 text-amber-500 shrink-0" />
+                          <span>Unsupported on Device</span>
+                        </div>
+                      ) : (
+                        <div className="text-slate-400 text-[10px] font-mono tracking-wide font-bold uppercase flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2.5 py-0.5 rounded-full">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                          <span>Disabled (Pending)</span>
+                        </div>
                       )}
                     </div>
+                    
+                    {permissionStatus === 'denied' && (
+                      <span className="text-[10px] text-rose-300 font-sans leading-relaxed bg-rose-950/15 border border-rose-950/50 rounded-lg p-2.5">
+                        ⚠️ <strong>Permissions blocked.</strong> Please click on the lock icon 🔒 next to the web address at the top or bottom of your browser, and toggle "Notifications" to "Allow", then click the switch again.
+                      </span>
+                    )}
                   </div>
 
                   <p className="text-[10px] font-sans text-slate-500 leading-normal">

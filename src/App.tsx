@@ -231,6 +231,17 @@ export default function App() {
 
   // Listen to subscription status in real-time
   const [subStatus, setSubStatus] = useState<'loading' | 'active' | 'inactive'>('loading');
+  const [deletedActivitiesTrigger, setDeletedActivitiesTrigger] = useState<number>(0);
+
+  useEffect(() => {
+    const handleDeletedActivitiesUpdated = () => {
+      setDeletedActivitiesTrigger(prev => prev + 1);
+    };
+    window.addEventListener('ich100l_deleted_activities_updated', handleDeletedActivitiesUpdated);
+    return () => {
+      window.removeEventListener('ich100l_deleted_activities_updated', handleDeletedActivitiesUpdated);
+    };
+  }, []);
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
   const [trialDetails, setTrialDetails] = useState<{ isTrial: boolean; daysRemaining: number } | null>(null);
 
@@ -1442,6 +1453,16 @@ export default function App() {
             onResetData={handleResetData}
             stats={{
               totalActivities: activities.filter(act => {
+                try {
+                  const stored = localStorage.getItem('ich100l_deleted_activities');
+                  const deletedList = stored ? JSON.parse(stored) : [];
+                  if (Array.isArray(deletedList) && deletedList.some((d: any) => d && d.id === act.id)) {
+                    return false;
+                  }
+                } catch (e) {
+                  console.warn('Failed to parse deleted activities from stats filter:', e);
+                }
+
                 if (act.date) {
                   const actMonday = getMondayOfDateString(act.date);
                   const currentMonday = getMondayOfCurrentWeek();
