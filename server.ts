@@ -180,23 +180,17 @@ async function sendResetEmail(email: string, name: string, resetLink: string) {
   }
 }
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
 
-  // Initialize and load stable VAPID keys from Firestore on boot
-  try {
-    await ensureVapidKeys();
-  } catch (err) {
-    console.error("[Server] Critical startup error: Could not load stable VAPID credentials:", err);
-  }
+const app = express();
+const PORT = 3000;
 
-  // Ensure uploads directory exists and is statically served
-  const uploadDir = path.join(process.cwd(), "uploads");
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-  }
-  app.use("/uploads", express.static(uploadDir));
+// Ensure uploads directory exists and is statically served
+const uploadDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+app.use("/uploads", express.static(uploadDir));
+
 
   // Multer Storage Configuration (accepts files up to 100MB)
   const storage = multer.diskStorage({
@@ -666,24 +660,39 @@ async function startServer() {
     }
   });
 
-  // Integrate Vite as a middleware
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+  // Asynchronous initialization block for loading VAPID keys and mounting Vite
+  async function initializeServer() {
+    try {
+      await ensureVapidKeys();
+    } catch (err) {
+      console.error("[Server] Critical startup error: Could not load stable VAPID credentials:", err);
+    }
+
+    // Integrate Vite as a middleware
+    if (process.env.NODE_ENV !== "production") {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
+
+    if (process.env.VERCEL) {
+      console.log("[Server] Running as a Vercel Serverless Function.");
+    } else {
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`[Server] ICH100L Full-stack Server listening on http://0.0.0.0:${PORT}`);
+      });
+    }
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Server] ICH100L Full-stack Server listening on http://0.0.0.0:${PORT}`);
-  });
-}
+  initializeServer();
 
-startServer();
+export default app;
+
