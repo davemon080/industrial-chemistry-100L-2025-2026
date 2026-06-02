@@ -236,6 +236,39 @@
         }
       },
       "required": ["id", "title", "pdfUrl", "uploadedAt"]
+    },
+    "Device": {
+      "title": "Device",
+      "description": "Device installation registry details for PWA and home screen tracking",
+      "type": "object",
+      "properties": {
+        "deviceId": { "type": "string" },
+        "matricNumber": { "type": "string" },
+        "name": { "type": "string" },
+        "isStandalone": { "type": "boolean" },
+        "platform": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "pushPermission": { "type": "string" },
+        "isInstalled": { "type": "boolean" },
+        "registeredAt": { "type": "string" },
+        "lastActiveAt": { "type": "string" }
+      },
+      "required": ["deviceId", "matricNumber", "isStandalone", "platform", "registeredAt", "lastActiveAt"]
+    },
+    "PushSubscription": {
+      "title": "PushSubscription",
+      "description": "Web Push protocol client subscriptions for background messaging",
+      "type": "object",
+      "properties": {
+        "subscription": { "type": "object" },
+        "matricNumber": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "isStandalone": { "type": "boolean" },
+        "platform": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["subscription", "matricNumber", "endpoint", "createdAt"]
     }
   },
   "firestore": {
@@ -270,6 +303,14 @@
     "announcements/{announcementId}": {
       "schema": "Announcement",
       "description": "Bulletins and announcements"
+    },
+    "devices/{deviceId}": {
+      "schema": "Device",
+      "description": "PWA and Web App device installation records"
+    },
+    "push-subscriptions/{subscriptionId}": {
+      "schema": "PushSubscription",
+      "description": "Client background messaging endpoints"
     }
   }
 }

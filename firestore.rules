@@ -79,5 +79,11 @@ service cloud.firestore {
     match /push-subscriptions/{subscriptionId} {
       allow read, write: if true;
     }
+
+    // Devices installation tracking collection
+    match /devices/{deviceId} {
+      allow read: if true;
+      allow create, update: if isValidId(deviceId);
+    }
   }
 }

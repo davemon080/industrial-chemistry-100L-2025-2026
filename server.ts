@@ -208,7 +208,7 @@ async function startServer() {
 
   // Web Push API: Save push subscription durably in Firestore
   app.post("/api/push-subscribe", async (req, res) => {
-    const { subscription, matricNumber } = req.body;
+    const { subscription, matricNumber, isStandalone, platform, name } = req.body;
     if (!subscription || !subscription.endpoint) {
       return res.status(400).json({ error: "Subscription payload with endpoint is required." });
     }
@@ -225,7 +225,10 @@ async function startServer() {
       await setDoc(doc(db, "push-subscriptions", docId), {
         subscription,
         matricNumber: matricNumber || "Guest",
+        name: name || "Guest",
         endpoint: subscription.endpoint,
+        isStandalone: !!isStandalone,
+        platform: platform || "Web",
         createdAt: new Date().toISOString()
       });
       res.json({ success: true });
@@ -259,7 +262,7 @@ async function startServer() {
 
   // Web Push API: Broadcast offline background notification alert
   app.post("/api/send-broadcast-push", async (req, res) => {
-    const { title, body, category } = req.body;
+    const { title, body, category, targetGroup, targetValue } = req.body;
     if (!title || !body) {
       return res.status(400).json({ error: "Title and body parameters are required for broadcasting alerts." });
     }
@@ -269,35 +272,106 @@ async function startServer() {
     }
 
     try {
-      const snap = await getDocs(collection(db, "push-subscriptions"));
-      if (snap.empty) {
+      const pushSubsSnap = await getDocs(collection(db, "push-subscriptions"));
+      const devicesSnap = await getDocs(collection(db, "devices"));
+
+      const unifiedTargetsMap = new Map<string, any>();
+
+      // 1. Process standard push-subscriptions
+      pushSubsSnap.docs.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.subscription && data.subscription.endpoint) {
+          unifiedTargetsMap.set(data.subscription.endpoint, {
+            id: docSnap.id,
+            source: "push-subscriptions",
+            subscription: data.subscription,
+            matricNumber: data.matricNumber || "Guest",
+            name: data.name || "Guest",
+            isStandalone: !!data.isStandalone,
+            platform: data.platform || "Web",
+          });
+        }
+      });
+
+      // 2. Process devices (using their subscription if active)
+      devicesSnap.docs.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.subscription && data.subscription.endpoint) {
+          const existing = unifiedTargetsMap.get(data.subscription.endpoint);
+          const isStandalone = !!data.isStandalone || (existing ? !!existing.isStandalone : false);
+          unifiedTargetsMap.set(data.subscription.endpoint, {
+            id: existing ? existing.id : docSnap.id,
+            source: existing ? `${existing.source}+devices` : "devices",
+            subscription: data.subscription,
+            matricNumber: data.matricNumber || (existing ? existing.matricNumber : "Guest"),
+            name: data.name || (existing ? existing.name : "Guest"),
+            isStandalone,
+            platform: data.platform || (existing ? existing.platform : "Web"),
+          });
+        }
+      });
+
+      const targets = Array.from(unifiedTargetsMap.values());
+
+      if (targets.length === 0) {
         return res.json({ success: true, count: 0, message: "No active push notifications configured." });
       }
 
-      const payload = JSON.stringify({ title, body, category });
-      const sendPromises = snap.docs.map(async (docSnap) => {
-        const data = docSnap.data();
-        if (!data.subscription) return;
+      // Filter targets to match targeting criteria dynamically
+      const matchingTargets = targets.filter((target) => {
+        if (!targetGroup || targetGroup === "all") {
+          return true;
+        }
 
+        if (targetGroup === "standalone") {
+          return !!target.isStandalone;
+        }
+
+        if (targetGroup === "platform" && targetValue) {
+          return String(target.platform || "").toLowerCase() === String(targetValue).toLowerCase();
+        }
+
+        if (targetGroup === "matric" && targetValue) {
+          const deviceMatric = String(target.matricNumber || "").trim().toLowerCase();
+          const filterMatric = String(targetValue).trim().toLowerCase();
+          return deviceMatric === filterMatric;
+        }
+
+        return true;
+      });
+
+      if (matchingTargets.length === 0) {
+        return res.json({ success: true, count: 0, message: "No devices found matching the selected targeting filters." });
+      }
+
+      const payload = JSON.stringify({ title, body, category });
+      let successfulCount = 0;
+      const sendPromises = matchingTargets.map(async (target) => {
         try {
-          await webpush.sendNotification(data.subscription, payload);
+          await webpush.sendNotification(target.subscription, payload);
+          successfulCount++;
         } catch (error: any) {
           // Check for expired or inactive registrations (Status 410 or 404)
           if (error.statusCode === 410 || error.statusCode === 404) {
-            console.log(`[WebPush] Pruning expired subscription for ID ${docSnap.id}`);
+            console.log(`[WebPush] Pruning expired subscription for ID ${target.id} sourced from ${target.source}`);
             try {
-              await deleteDoc(doc(db, "push-subscriptions", docSnap.id));
+              if (target.source.includes("push-subscriptions")) {
+                await deleteDoc(doc(db, "push-subscriptions", target.id));
+              }
+              if (target.source.includes("devices")) {
+                await setDoc(doc(db, "devices", target.id), { subscription: null }, { merge: true });
+              }
             } catch (pruningError) {
               console.error("[WebPush] Failed to prune subscription:", pruningError);
             }
           } else {
-            console.error(`[WebPush] Push execution failed for subscription ID: ${docSnap.id}`, error);
+            console.error(`[WebPush] Push execution failed for target ID: ${target.id}`, error);
           }
         }
       });
 
       await Promise.all(sendPromises);
-      res.json({ success: true, count: snap.size });
+      res.json({ success: true, count: successfulCount, totalMatched: matchingTargets.length });
     } catch (err: any) {
       console.error("[Server] Broadcast WebPush system dispatch failed:", err);
       res.status(500).json({ error: err.message || "Failed to trigger PWA background alerts." });

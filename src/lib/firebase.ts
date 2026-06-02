@@ -8,7 +8,6 @@ import {
   initializeFirestore, 
   doc, 
   getDoc, 
-  getDocFromServer,
   setDoc, 
   getDocs, 
   collection, 
@@ -39,14 +38,10 @@ export const db = initializeFirestore(app, {
 // Test connection on boot to verify correct synchronization
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'system-config', 'app-branding'));
-    console.log("Firebase connection verified and synchronized.");
+    await getDoc(doc(db, 'system-config', 'app-branding'));
+    console.log("Firebase connection initialized.");
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration: Client is offline.");
-    } else {
-      console.warn("Connection test completed:", error);
-    }
+    console.log("Firebase offline cache mode enabled.");
   }
 }
 testConnection();

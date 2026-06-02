@@ -28,6 +28,7 @@ import Announcements from './components/Announcements';
 import ProfileView from './components/ProfileView';
 import AddEditPage from './components/AddEditPage';
 import NotificationsPage, { NotificationItem } from './components/NotificationsPage';
+import PushConfigPage from './components/PushConfigPage';
 import SubscriptionPaywall from './components/SubscriptionPaywall';
 import ModulesView from './components/ModulesView';
 import CalendarView from './components/CalendarView';
@@ -104,6 +105,88 @@ function registerDeletedActivityLocally(activity: Activity) {
   }
 }
 
+const registerDeviceInFirestore = async (user?: User | null, isInstalledEvent = false) => {
+  if (!db) return;
+  try {
+    let deviceId = localStorage.getItem('ich100l_device_id');
+    if (!deviceId) {
+      deviceId = 'dev_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 12);
+      localStorage.setItem('ich100l_device_id', deviceId);
+    }
+
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
+                         (navigator as any).standalone === true ||
+                         document.referrer.includes('android-app://');
+
+    const userAgent = navigator.userAgent || '';
+    let platform = 'Web';
+    if (/iPad|iPhone|iPod/.test(userAgent)) {
+      platform = 'iOS';
+    } else if (/Android/.test(userAgent)) {
+      platform = 'Android';
+    } else if (/Macintosh/.test(userAgent)) {
+      platform = 'macOS';
+    } else if (/Windows/.test(userAgent)) {
+      platform = 'Windows';
+    } else if (/Linux/.test(userAgent)) {
+      platform = 'Linux';
+    }
+
+    const pushPermission = 'Notification' in window ? Notification.permission : 'unsupported';
+    
+    let subscription: any = null;
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          const sub = await reg.pushManager.getSubscription();
+          if (sub) {
+            const rawSubJSON = sub.toJSON();
+            subscription = {
+              endpoint: sub.endpoint,
+              keys: {
+                p256dh: rawSubJSON.keys?.p256dh || '',
+                auth: rawSubJSON.keys?.auth || ''
+              }
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('[Device Registry] Active registration push retrieval skipped:', e);
+      }
+    }
+
+    const cleanDeviceId = getSafeDocId(deviceId);
+    const existingInstalled = localStorage.getItem('ich100l_pwa_installed') === 'true';
+    const isInstalled = isInstalledEvent || existingInstalled || isStandalone;
+
+    if (isInstalledEvent) {
+      localStorage.setItem('ich100l_pwa_installed', 'true');
+    }
+
+    const devicePayload: any = {
+      deviceId: cleanDeviceId,
+      matricNumber: user?.matricNumber || 'Guest',
+      name: user?.name || 'Guest',
+      isStandalone,
+      platform,
+      userAgent: userAgent.slice(0, 250),
+      pushPermission,
+      isInstalled,
+      registeredAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString()
+    };
+
+    if (subscription) {
+      devicePayload.subscription = subscription;
+    }
+
+    await setDoc(doc(db, 'devices', cleanDeviceId), devicePayload, { merge: true });
+  } catch (err) {
+    console.warn('[Device Registry] Failed to record device context:', err);
+  }
+};
+
 export default function App() {
   // Authentication state
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -140,15 +223,26 @@ export default function App() {
       console.log('[PWA App] beforeinstallprompt caught & stored.');
     };
 
+    const handleAppInstalled = () => {
+      console.log('[PWA App] appinstalled event caught. The user installed the application.');
+      registerDeviceInFirestore(currentUser, true);
+    };
+
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    
+    // Initial and periodic registration check
+    registerDeviceInFirestore(currentUser);
+
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
-  }, []);
+  }, [currentUser]);
 
   // Auto-sync Web Push subscription state on App startup and whenever user logs in
   useEffect(() => {
-    if (currentUser && 'serviceWorker' in navigator) {
+    if ('serviceWorker' in navigator) {
       navigator.serviceWorker.ready.then((reg) => {
         reg.pushManager.getSubscription().then((sub) => {
           if (sub) {
@@ -161,12 +255,30 @@ export default function App() {
                 auth: rawSubJSON.keys?.auth || ''
               }
             };
+
+            const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
+                                 (navigator as any).standalone === true;
+            const userAgent = navigator.userAgent || '';
+            let platform = 'Web';
+            if (/iPad|iPhone|iPod/.test(userAgent)) {
+              platform = 'iOS';
+            } else if (/Android/.test(userAgent)) {
+              platform = 'Android';
+            } else if (/Macintosh/.test(userAgent)) {
+              platform = 'macOS';
+            } else if (/Windows/.test(userAgent)) {
+              platform = 'Windows';
+            }
+
             fetch('/api/push-subscribe', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 subscription: serializedSub,
-                matricNumber: currentUser.matricNumber
+                matricNumber: currentUser?.matricNumber || 'Guest',
+                name: currentUser?.name || 'Guest',
+                isStandalone,
+                platform
               })
             }).catch((err) => {
               console.warn('[PWA App] Auto-sync silent push setup failure:', err);
@@ -1146,15 +1258,19 @@ export default function App() {
         // 4. Fall back to standard OS-level push notifications if authorized by the student
         if ('Notification' in window && Notification.permission === 'granted') {
           const title = latestNotif.title;
-          const options = {
+          const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+          const options: NotificationOptions = {
             body: latestNotif.body,
-            icon: '/logo.svg',
-            badge: '/logo.svg',
-            vibrate: [200, 100, 200],
-            tag: latestNotif.id,
-            silent: false,
-            sound: 'default'
+            icon: '/logo-192.png',
+            badge: '/logo-192.png',
+            tag: latestNotif.id
           };
+
+          if (!isIOS) {
+            (options as any).vibrate = [200, 100, 200];
+            (options as any).silent = false;
+            (options as any).sound = 'default';
+          }
 
           // Try Service Worker showNotification first (iOS/PWA standard)
           if ('serviceWorker' in navigator) {
@@ -1609,6 +1725,7 @@ export default function App() {
             onBack={() => setActiveTab('schedule')}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             notifications={notifications}
+            isCourseRep={isCourseRep}
             onMarkAllAsRead={() => {
               setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
             }}
@@ -1620,6 +1737,13 @@ export default function App() {
             onClearNotifications={() => {
               setNotifications([]);
             }}
+          />
+        );
+      case 'push-config' as any:
+        return (
+          <PushConfigPage
+            onBack={() => setActiveTab('notifications' as any)}
+            isCourseRep={isCourseRep}
           />
         );
       default:

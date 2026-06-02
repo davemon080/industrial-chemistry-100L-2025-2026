@@ -138,14 +138,19 @@ self.addEventListener('push', (event) => {
     body: data.body,
     icon: baseUrl + '/logo-192.png',
     badge: baseUrl + '/logo-192.png',
-    vibrate: [200, 100, 200],
-    tag: data.id || `ich-${Date.now()}`,
-    silent: false,
-    sound: 'default',
+    tag: data.id || 'ich-alert',
     data: {
       url: baseUrl + '/'
     }
   };
+
+  // Strip non-standard/high-risk properties on iOS Safari/PWA to ensure strict compatibility with APNS
+  const isIOS = /iPad|iPhone|iPod/.test(self.navigator.userAgent || '');
+  if (!isIOS) {
+    options.vibrate = [200, 100, 200];
+    options.silent = false;
+    options.sound = 'default';
+  }
 
   console.log('[PWA SW] Triggering showNotification via self.registration instance. Title:', data.title, 'Options:', options);
 

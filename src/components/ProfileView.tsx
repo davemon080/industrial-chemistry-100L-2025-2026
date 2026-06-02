@@ -231,7 +231,15 @@ export default function ProfileView({
 
     setIsRegisteringPush(true);
     try {
-      const result = await Notification.requestPermission();
+      let result: NotificationPermission;
+      try {
+        result = await Notification.requestPermission();
+      } catch (err) {
+        console.log('[WebPush Debug] standard requestPermission Promise failed, executing legacy callback fallback...', err);
+        result = await new Promise<NotificationPermission>((resolve) => {
+          Notification.requestPermission(resolve);
+        });
+      }
       setPermissionStatus(result);
       
       if (result === 'granted') {
@@ -345,12 +353,29 @@ export default function ProfileView({
                 const endpointSuffix = (serializedSub.endpoint || '').slice(-50);
                 const subDocId = getSafeDocId(`${user?.matricNumber || 'Guest'}_${endpointSuffix}`);
                 
+                const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
+                                     (navigator as any).standalone === true;
+                const userAgent = navigator.userAgent || '';
+                let platform = 'Web';
+                if (/iPad|iPhone|iPod/.test(userAgent)) {
+                  platform = 'iOS';
+                } else if (/Android/.test(userAgent)) {
+                  platform = 'Android';
+                } else if (/Macintosh/.test(userAgent)) {
+                  platform = 'macOS';
+                } else if (/Windows/.test(userAgent)) {
+                  platform = 'Windows';
+                }
+
                 console.log('[WebPush Debug] Writing subscription directly to Firestore:', subDocId);
                 try {
                   await setDoc(doc(db, 'push-subscriptions', subDocId), {
                     subscription: serializedSub,
                     matricNumber: user?.matricNumber || 'Guest',
+                    name: user?.name || 'Guest',
                     endpoint: serializedSub.endpoint,
+                    isStandalone,
+                    platform,
                     createdAt: new Date().toISOString()
                   });
                   console.log('[WebPush Debug] Direct Firestore write successful!');
@@ -366,7 +391,10 @@ export default function ProfileView({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       subscription: serializedSub,
-                      matricNumber: user?.matricNumber || 'Guest'
+                      matricNumber: user?.matricNumber || 'Guest',
+                      name: user?.name || 'Guest',
+                      isStandalone,
+                      platform
                     })
                   });
                   
