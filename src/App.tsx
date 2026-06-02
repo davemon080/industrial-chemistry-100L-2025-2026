@@ -1238,13 +1238,43 @@ export default function App() {
     if (notifications.length > lastNotificationsCountRef.current) {
       const latestNotif = notifications[0];
       if (latestNotif && !latestNotif.isRead) {
-        // 1. Trigger the premium, high-fidelity in-app sliding popup banner!
-        setActiveToast({
-          id: latestNotif.id,
-          title: latestNotif.title,
+        // 1. Trigger actual device/native popup notification on iOS and Android devices if permission is granted
+        const title = latestNotif.title;
+        const options = {
           body: latestNotif.body,
-          type: latestNotif.type || 'info'
-        });
+          icon: '/logo-192.png',
+          badge: '/logo-192.png',
+          tag: latestNotif.id || 'ich-alert',
+          data: {
+            url: window.location.origin + '/'
+          }
+        };
+
+        if ('Notification' in window && Notification.permission === 'granted') {
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready
+              .then(async (reg) => {
+                try {
+                  await reg.showNotification(title, options);
+                  console.log('[AppClient] Successfully served native popup notification on device.');
+                } catch (notifErr) {
+                  console.warn('[AppClient] SW showNotification failed, using fallback standard Notification API:', notifErr);
+                  try {
+                    new Notification(title, options);
+                  } catch (e) {}
+                }
+              })
+              .catch(() => {
+                try {
+                  new Notification(title, options);
+                } catch (e) {}
+              });
+          } else {
+            try {
+              new Notification(title, options);
+            } catch (e) {}
+          }
+        }
 
         // 2. Play the synthesized mobile notice double chime
         playNotificationSound();
@@ -1255,9 +1285,6 @@ export default function App() {
             navigator.vibrate([80, 50, 80]);
           } catch (vibErr) {}
         }
-
-        // Defer native lockscreen notifications entirely to background Service Worker.
-        // This ensures zero duplicate alerts for users online in either iOS or Android.
       }
     }
     lastNotificationsCountRef.current = notifications.length;
@@ -1764,65 +1791,6 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-[#0f172a] text-slate-100 flex flex-col relative">
-      {/* Toast Notification Banner - Premium iOS / Android sliding push popup style */}
-      <AnimatePresence>
-        {activeToast && (
-          <motion.div
-            initial={{ opacity: 0, y: -100, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -50, scale: 0.95 }}
-            transition={{ type: 'spring', damping: 18, stiffness: 200 }}
-            className="fixed top-4 left-4 right-4 max-w-sm mx-auto z-[999999] pointer-events-auto cursor-pointer"
-            onClick={() => {
-              setActiveTab('notifications' as any);
-              setActiveToast(null);
-            }}
-          >
-            <div className="glassmorphism p-4 rounded-2xl border border-indigo-500/30 shadow-[0_12px_40px_rgba(0,0,0,0.65),0_0_20px_rgba(99,102,241,0.25)] bg-[#0f172a]/95 backdrop-blur-xl flex items-start gap-3.5 relative overflow-hidden group transition-all duration-300 hover:shadow-[0_12px_45px_rgba(0,0,0,0.7),0_0_25px_rgba(99,102,241,0.3)]">
-              {/* Pulsing ambient accent gradient glow inside */}
-              <div className="absolute inset-x-0 inset-y-0 rounded-2xl bg-gradient-to-r from-indigo-500/10 via-purple-500/5 to-violet-500/10 opacity-70 group-hover:opacity-100 transition-opacity pointer-events-none" />
-              
-              {/* Premium left side active colorful indicator pin */}
-              <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-indigo-500 via-indigo-600 to-violet-500 rounded-l-2xl animate-pulse" />
-
-              <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 shrink-0 mt-0.5 border border-indigo-500/25 group-hover:scale-105 transition-all shadow-[0_0_10px_rgba(99,102,241,0.15)]">
-                <Bell className="w-5 h-5" />
-              </div>
-
-              <div className="flex-1 min-w-0 pr-5">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-sans font-bold tracking-wider text-indigo-300 uppercase leading-none">
-                    {activeToast.title}
-                  </h4>
-                  <span className="text-[8px] font-mono font-black text-indigo-200 bg-indigo-500/15 border border-indigo-500/20 px-2.5 py-0.5 rounded-full select-none leading-none animate-pulse">
-                    Just Now
-                  </span>
-                </div>
-                <p className="text-xs text-slate-200 font-sans mt-1.5 leading-snug font-medium line-clamp-2">
-                  {activeToast.body}
-                </p>
-                <div className="mt-2 text-[9px] font-mono text-indigo-400 flex items-center gap-1 font-bold group-hover:text-indigo-300 transition-colors">
-                  <span>Tap to view noticeboard</span>
-                  <span className="text-xs leading-none shrink-0">➔</span>
-                </div>
-              </div>
-
-              {/* Absolute Close banner button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveToast(null);
-                }}
-                className="absolute top-3.5 right-3 w-5 h-5 rounded-full bg-slate-950/40 hover:bg-slate-950 text-slate-400 hover:text-white flex items-center justify-center p-0 cursor-pointer text-xs font-bold outline-none border-none transition-all duration-200 hover:scale-110 active:scale-95"
-                title="Dismiss Notice"
-              >
-                ✕
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Verification Overlays */}
       {isVerifyingURL && (
         <div className="fixed inset-0 bg-slate-950/90 z-[99999] flex flex-col items-center justify-center p-4 backdrop-blur-md">

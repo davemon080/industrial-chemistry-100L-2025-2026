@@ -143,6 +143,9 @@ async function sendResetEmail(email: string, name: string, resetLink: string) {
     auth: {
       user,
       pass
+    },
+    tls: {
+      rejectUnauthorized: false
     }
   });
 
@@ -173,7 +176,7 @@ async function sendResetEmail(email: string, name: string, resetLink: string) {
     return { success: true, simulated: false };
   } catch (err: any) {
     console.error("[Server SMTP] Error sending reset email:", err);
-    throw new Error(`Email dispatch failed: \${err.message}`);
+    throw new Error(`Email dispatch failed: ${err.message}`);
   }
 }
 
