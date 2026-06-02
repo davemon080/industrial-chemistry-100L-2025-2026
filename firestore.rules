@@ -87,5 +87,10 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isValidId(deviceId);
     }
+
+    // Feedbacks collection
+    match /feedbacks/{feedbackId} {
+      allow read, write: if isValidId(feedbackId);
+    }
   }
 }

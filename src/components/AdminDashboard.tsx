@@ -9,11 +9,12 @@ import {
   Users, UserPlus, Shield, ShieldCheck, ShieldAlert, KeyRound, 
   Trash2, Search, Loader2, LogOut, RefreshCw, Sparkles, Check, AlertTriangle, 
   GraduationCap, Mail, Calendar, CheckCircle, Info, Plus, Settings, LayoutDashboard,
-  Ban
+  Ban, MessageSquare
 } from 'lucide-react';
 import GlassCard from './GlassCard';
+import FeedbackPage from './FeedbackPage';
 import { db, getSafeDocId, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, getDocs, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 interface AdminDashboardProps {
   currentUser: any;
@@ -35,8 +36,9 @@ export default function AdminDashboard({
   const [isRevokingSub, setIsRevokingSub] = useState<string | null>(null);
 
   // Bottom navigation state
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'settings'>('dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'settings' | 'feedback'>('dashboard');
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [unreadFeedbacksCount, setUnreadFeedbacksCount] = useState(0);
 
   // Password reset/management states
   const [currentPassword, setCurrentPassword] = useState('');
@@ -300,6 +302,24 @@ export default function AdminDashboard({
 
   useEffect(() => {
     fetchUsers();
+  }, []);
+
+  // Listen to live unread feedbacks to update badge
+  useEffect(() => {
+    let unsubscribe = () => {};
+    if (db) {
+      try {
+        unsubscribe = onSnapshot(collection(db, 'feedbacks'), (snapshot) => {
+          const count = snapshot.docs.filter(doc => doc.data().status === 'unread').length;
+          setUnreadFeedbacksCount(count);
+        }, (err) => {
+          console.warn('[Admin] Live feedback count fallback:', err);
+        });
+      } catch (err) {
+        console.error('[Admin] Live feedback onSnapshot subscription failed:', err);
+      }
+    }
+    return () => unsubscribe();
   }, []);
 
   // Clear toast feedback
@@ -941,6 +961,16 @@ export default function AdminDashboard({
               </div>
             </div>
           </>
+        ) : activeAdminTab === 'feedback' ? (
+          <FeedbackPage
+            user={{
+              email: currentUser?.email || '',
+              matricNumber: currentUser?.matricNumber || 'Admin',
+              name: currentUser?.name || 'Administrator',
+              isAdmin: true
+            }}
+            isAdminMode={true}
+          />
         ) : (
           <div className="max-w-md mx-auto space-y-4 pb-32">
             <div className="flex items-center gap-2 border-b border-slate-900 pb-2">
@@ -1270,7 +1300,7 @@ export default function AdminDashboard({
       {/* Floating Bottom Navigation Menu for Admin */}
       <nav
         id="admin-bottom-navigation"
-        className="fixed bottom-6 left-4 right-4 z-40 max-w-[280px] mx-auto bg-slate-950/80 backdrop-blur-xl border border-slate-850/90 rounded-full px-5 py-0.5 shadow-[0_15px_35px_rgba(0,0,0,0.6)]"
+        className="fixed bottom-6 left-4 right-4 z-40 max-w-[340px] mx-auto bg-slate-950/80 backdrop-blur-xl border border-slate-850/90 rounded-full px-5 py-0.5 shadow-[0_15px_35px_rgba(0,0,0,0.6)]"
       >
         <div className="flex items-center justify-around">
           <button
@@ -1299,11 +1329,41 @@ export default function AdminDashboard({
           </button>
 
           <button
+            onClick={() => setActiveAdminTab('feedback')}
+            className="relative flex flex-col items-center justify-center py-1 px-4 transition-all duration-300 rounded-xl outline-none cursor-pointer"
+          >
+            {unreadFeedbacksCount > 0 && activeAdminTab !== 'feedback' && (
+              <span className="absolute top-0.5 right-3 bg-rose-500 text-white font-sans text-[8px] font-bold h-4 min-w-[16px] px-1 rounded-full flex items-center justify-center animate-pulse z-10 shadow-[0_0_8px_rgba(244,63,94,0.6)]">
+                {unreadFeedbacksCount}
+              </span>
+            )}
+            <div
+              className={`flex items-center justify-center p-1.5 rounded-lg transition-all duration-300 ${
+                activeAdminTab === 'feedback'
+                  ? 'text-indigo-400 bg-indigo-500/10'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+            </div>
+            <span
+              className={`text-[9.5px] mt-0.5 font-medium tracking-wide font-sans transition-colors duration-300 ${
+                activeAdminTab === 'feedback' ? 'text-indigo-300' : 'text-slate-500'
+              }`}
+            >
+              Feedback
+            </span>
+            {activeAdminTab === 'feedback' && (
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-indigo-400 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+            )}
+          </button>
+
+          <button
             onClick={() => setActiveAdminTab('settings')}
             className="relative flex flex-col items-center justify-center py-1 px-4 transition-all duration-300 rounded-xl outline-none cursor-pointer"
           >
             <div
-              className={`flex items-center justify-center p-1.5 rounded-lg transition-all duration-305 ${
+              className={`flex items-center justify-center p-1.5 rounded-lg transition-all duration-300 ${
                 activeAdminTab === 'settings'
                   ? 'text-indigo-400 bg-indigo-500/10'
                   : 'text-slate-400 hover:text-slate-200'

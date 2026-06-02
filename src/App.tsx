@@ -33,6 +33,7 @@ import PushConfigPage from './components/PushConfigPage';
 import SubscriptionPaywall from './components/SubscriptionPaywall';
 import ModulesView from './components/ModulesView';
 import CalendarView from './components/CalendarView';
+import FeedbackPage from './components/FeedbackPage';
 import DateScheduleView from './components/DateScheduleView';
 
 function getMondayOfCurrentWeek(): string {
@@ -1735,6 +1736,19 @@ export default function App() {
             onClearNotifications={() => {
               setNotifications([]);
             }}
+          />
+        );
+      case 'feedback' as any:
+        return (
+          <FeedbackPage
+            user={{
+              email: currentUser?.email || '',
+              matricNumber: currentUser?.matricNumber || '',
+              name: currentUser?.name || 'Student',
+              isAdmin: isCourseRep || currentUser?.isAdmin
+            }}
+            isAdminMode={false}
+            onBack={() => setActiveTab('profile')}
           />
         );
       case 'push-config' as any:

@@ -25,7 +25,9 @@ import {
   Sparkles,
   HelpCircle,
   Smartphone,
-  Share
+  Share,
+  MessageSquare,
+  MessageCircle
 } from 'lucide-react';
 import GlassCard from './GlassCard';
 import { DEFAULT_COURSE_REP_MATRIC } from '../data/defaultData';
@@ -1192,6 +1194,28 @@ export default function ProfileView({
               )}
             </div>
           )}
+        </div>
+
+        {/* Support & Feedback Helpdesk Panel */}
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden transition-all duration-300">
+          <button
+            type="button"
+            onClick={() => onChangeTab('feedback')}
+            className="w-full p-4 hover:bg-slate-900/40 text-left flex items-center justify-between pointer-events-auto cursor-pointer outline-none group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-slate-950 text-slate-450 group-hover:text-indigo-400 transition-colors">
+                <MessageSquare className="w-4 h-4 text-indigo-400" />
+              </div>
+              <div>
+                <p className="text-sm font-sans font-medium text-slate-200 animate-none">Helpdesk & Feedback</p>
+                <p className="text-xs text-slate-500 font-sans">Send inquiries and suggestions to course administrators</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400 group-hover:text-white px-2.5 py-1 rounded bg-slate-950 text-center transition-colors">
+              Access
+            </span>
+          </button>
         </div>
 
         {/* Change Password Panel */}

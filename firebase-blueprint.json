@@ -269,6 +269,39 @@
         "name": { "type": "string" }
       },
       "required": ["subscription", "matricNumber", "endpoint", "createdAt"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Student feedback submission, suggestions, or reports sent to administrators",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "matricNumber": {
+          "type": "string"
+        },
+        "studentName": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["unread", "read", "replied"]
+        }
+      },
+      "required": ["id", "matricNumber", "studentName", "email", "subject", "message", "createdAt", "status"]
     }
   },
   "firestore": {
@@ -311,6 +344,10 @@
     "push-subscriptions/{subscriptionId}": {
       "schema": "PushSubscription",
       "description": "Client background messaging endpoints"
+    },
+    "feedbacks/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "Course and app feedback entries from students"
     }
   }
 }
