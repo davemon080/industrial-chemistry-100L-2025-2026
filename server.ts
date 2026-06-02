@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -6,6 +9,7 @@ import { createServer as createViteServer } from "vite";
 import webpush from "web-push";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, getDocs, getDoc, setDoc, doc, deleteDoc } from "firebase/firestore";
+import nodemailer from "nodemailer";
 
 // Setup Firebase client instance on server matching firebase-applet-config
 let db: any = null;
@@ -113,6 +117,64 @@ async function ensureVapidKeys() {
     vapidKeys.privateKey
   );
   return vapidKeys;
+}
+
+async function sendResetEmail(email: string, name: string, resetLink: string) {
+  const host = process.env.SMTP_HOST || "smtp.gmail.com";
+  const port = parseInt(process.env.SMTP_PORT || "587", 10);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || "no-reply@ich100l.edu";
+
+  // Check if SMTP is configured
+  if (!user || !pass) {
+    console.warn("[Server SMTP] Credentials not configured. Password reset link printed to console:", resetLink);
+    return {
+      success: false,
+      simulated: true,
+      message: "SMTP is not configured in environment variables. Password reset link was simulated."
+    };
+  }
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: {
+      user,
+      pass
+    }
+  });
+
+  const mailOptions = {
+    from: `"ICH100L Portal" <${from}>`,
+    to: email,
+    subject: "Reset your ICH100L Portal Password",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <h2 style="color: #4f46e5; text-align: center;">ICH100L Portal</h2>
+        <p>Dear ${name || "Student"},</p>
+        <p>We received a request to reset the password for your ICH100L Chemistry Activities Account.</p>
+        <p>You can reset your password by clicking the secure button below:</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetLink}" style="background-color: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Reset Password</a>
+        </div>
+        <p style="color: #64748b; font-size: 14px;">Alternatively, copy and paste this link into your browser address bar:</p>
+        <p style="word-break: break-all; color: #4f46e5; font-size: 14px;"><a href="${resetLink}">${resetLink}</a></p>
+        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+        <p style="font-size: 12px; color: #94a3b8; text-align: center;">This link will expire in 1 hour. If you did not request this password reset, please ignore this email.</p>
+      </div>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`[Server SMTP] Successfully sent reset link email to ${email}`);
+    return { success: true, simulated: false };
+  } catch (err: any) {
+    console.error("[Server SMTP] Error sending reset email:", err);
+    throw new Error(`Email dispatch failed: \${err.message}`);
+  }
 }
 
 async function startServer() {
@@ -348,7 +410,13 @@ async function startServer() {
       let successfulCount = 0;
       const sendPromises = matchingTargets.map(async (target) => {
         try {
-          await webpush.sendNotification(target.subscription, payload);
+          await webpush.sendNotification(target.subscription, payload, {
+            TTL: 86400, // 24 hours Time-to-Live limit
+            headers: {
+              "Urgency": "high",
+              "Topic": category || "announcements"
+            }
+          });
           successfulCount++;
         } catch (error: any) {
           // Check for expired or inactive registrations (Status 410 or 404)
@@ -489,6 +557,109 @@ async function startServer() {
         success: false,
         error: err.message || "An error occurred during transaction initialization."
       });
+    }
+  });
+
+  // API route to request a password reset link
+  app.post("/api/forgot-password", async (req, res) => {
+    const { email, matricNumber } = req.body;
+    if (!email || !matricNumber) {
+      return res.status(400).json({ error: "Email and matriculation number are required." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Backend database connection is offline." });
+    }
+
+    try {
+      const safeId = getSafeDocId(matricNumber);
+      const userDocRef = doc(db, "users", safeId);
+      const userSnap = await getDoc(userDocRef);
+
+      if (!userSnap.exists()) {
+        return res.status(404).json({ error: "Matriculation number is not registered on this system." });
+      }
+
+      const userData = userSnap.data();
+      if (String(userData.email).trim().toLowerCase() !== String(email).trim().toLowerCase()) {
+        return res.status(400).json({ error: "Entered email does not match our records for this matric number." });
+      }
+
+      // Generate a secure reset token
+      const resetToken = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour validity
+
+      // Update in Firestore
+      await setDoc(userDocRef, { resetToken, resetTokenExpiry }, { merge: true });
+
+      // Determine the redirect link containing the secure parameters
+      const appUrl = process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
+      const resetLink = `${appUrl}?reset_token=${resetToken}&reset_matric=${encodeURIComponent(matricNumber)}`;
+
+      const emailResult = await sendResetEmail(userData.email, userData.name, resetLink);
+
+      return res.json({
+        success: true,
+        simulated: emailResult.simulated,
+        resetLink: emailResult.simulated ? resetLink : undefined,
+        message: emailResult.simulated
+          ? "SMTP server credentials are not configured in environment variables. Password reset link was output to system logs and simulated here."
+          : "A secure password reset link has been dispatched to your institutional email."
+      });
+    } catch (err: any) {
+      console.error("[ForgotPassword] Error: ", err);
+      return res.status(500).json({ error: err.message || "An error occurred while initiating password reset." });
+    }
+  });
+
+  // API route to perform password reset
+  app.post("/api/reset-password", async (req, res) => {
+    const { token, matricNumber, newPassword } = req.body;
+    if (!token || !matricNumber || !newPassword) {
+      return res.status(400).json({ error: "Token, matric number, and new password are required." });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters long." });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: "Backend database connection is offline." });
+    }
+
+    try {
+      const safeId = getSafeDocId(matricNumber);
+      const userDocRef = doc(db, "users", safeId);
+      const userSnap = await getDoc(userDocRef);
+
+      if (!userSnap.exists()) {
+        return res.status(404).json({ error: "User profile associated with this reset link was not found." });
+      }
+
+      const userData = userSnap.data();
+      if (!userData.resetToken || userData.resetToken !== token) {
+        return res.status(400).json({ error: "Invalid or expired password reset token." });
+      }
+
+      const now = new Date().toISOString();
+      if (!userData.resetTokenExpiry || userData.resetTokenExpiry < now) {
+        return res.status(400).json({ error: "The password reset link has expired. Please request a new one." });
+      }
+
+      // Update password and clear reset token info
+      await setDoc(userDocRef, {
+        password: newPassword,
+        resetToken: null,
+        resetTokenExpiry: null
+      }, { merge: true });
+
+      return res.json({
+        success: true,
+        message: "Your password has been successfully reset. You can now log in using your new password."
+      });
+    } catch (err: any) {
+      console.error("[ResetPassword] Error: ", err);
+      return res.status(500).json({ error: err.message || "Failed to reset password." });
     }
   });
 

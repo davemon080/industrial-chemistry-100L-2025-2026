@@ -22,6 +22,7 @@ import { collection, onSnapshot, doc, setDoc, deleteDoc, getDocs, getDoc, collec
 import GlassCard from './components/GlassCard';
 import BottomNav, { TabType } from './components/BottomNav';
 import LoginScreen from './components/LoginScreen';
+import AdminDashboard from './components/AdminDashboard';
 import Scheduler from './components/Scheduler';
 import Deadlines from './components/Deadlines';
 import Announcements from './components/Announcements';
@@ -566,7 +567,7 @@ export default function App() {
       return;
     }
 
-    if (currentUser.matricNumber === DEFAULT_COURSE_REP_MATRIC) {
+    if (currentUser.matricNumber === DEFAULT_COURSE_REP_MATRIC || currentUser.isCourseRep === true) {
       setSubStatus('active');
       setSubscriptionDetails({
         status: 'active',
@@ -775,7 +776,7 @@ export default function App() {
 
     // Safety check: ONLY the Course Representative is authorized to execute database rollovers and resets!
     // This absolutely prevents race conditions and timezone mismatches of standard students from wiping other users' data.
-    const isRep = currentUser.matricNumber === DEFAULT_COURSE_REP_MATRIC;
+    const isRep = currentUser.matricNumber === DEFAULT_COURSE_REP_MATRIC || currentUser.isCourseRep === true;
     if (!isRep) return;
 
     const wipeAndSeedIfNewWeek = async () => {
@@ -1255,47 +1256,8 @@ export default function App() {
           } catch (vibErr) {}
         }
 
-        // 4. Fall back to standard OS-level push notifications if authorized by the student
-        if ('Notification' in window && Notification.permission === 'granted') {
-          const title = latestNotif.title;
-          const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent || '');
-          const options: NotificationOptions = {
-            body: latestNotif.body,
-            icon: '/logo-192.png',
-            badge: '/logo-192.png',
-            tag: latestNotif.id
-          };
-
-          if (!isIOS) {
-            (options as any).vibrate = [200, 100, 200];
-            (options as any).silent = false;
-            (options as any).sound = 'default';
-          }
-
-          // Try Service Worker showNotification first (iOS/PWA standard)
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.ready
-              .then((reg) => {
-                console.log('[WebPush Sync Debug] Dispatching local notification via service worker showNotification:', title, options);
-                reg.showNotification(title, options);
-              })
-              .catch((err) => {
-                console.warn('[WebPush Sync Debug] Service Worker notification fell back to standard constructor:', err);
-                try {
-                  new Notification(title, options);
-                } catch (e) {
-                  console.error('[WebPush Sync Debug] Constructor fallback error:', e);
-                }
-              });
-          } else {
-            console.log('[WebPush Sync Debug] Service Worker not supported; using standard Notification constructor:', title);
-            try {
-              new Notification(title, options);
-            } catch (e) {
-              console.error('[WebPush Sync Debug] Direct constructor launch failed:', e);
-            }
-          }
-        }
+        // Defer native lockscreen notifications entirely to background Service Worker.
+        // This ensures zero duplicate alerts for users online in either iOS or Android.
       }
     }
     lastNotificationsCountRef.current = notifications.length;
@@ -1337,7 +1299,7 @@ export default function App() {
     localStorage.setItem('ich100l_announcements', JSON.stringify(announcements));
   }, [announcements]);
 
-  const isCourseRep = currentUser?.matricNumber === DEFAULT_COURSE_REP_MATRIC;
+  const isCourseRep = currentUser?.matricNumber === DEFAULT_COURSE_REP_MATRIC || currentUser?.isCourseRep === true;
 
   // Sign out handler
   const handleLogout = () => {
@@ -1754,6 +1716,16 @@ export default function App() {
   // If unauthorized, show login overlay
   if (!currentUser) {
     return <LoginScreen onLoginSuccess={setCurrentUser} />;
+  }
+
+  // If logged in under admin parameters, bootstrap the whole new Admin Dashboard instead of the student interface
+  if (currentUser.isAdmin || currentUser.matricNumber === '2026/ps/ich/0034') {
+    return (
+      <AdminDashboard
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
+    );
   }
 
   if (addingOrEditing) {

@@ -15,12 +15,14 @@ service cloud.firestore {
     match /users/{matricNumber} {
       allow read: if true;
       allow create, update: if isValidId(matricNumber) && isValidId(request.resource.data.matricNumber);
+      allow delete: if isValidId(matricNumber);
     }
 
     // Subscriptions collection
     match /subscriptions/{matricNumber} {
       allow read: if true;
       allow create, update: if isValidId(matricNumber) && isValidId(request.resource.data.matricNumber);
+      allow delete: if isValidId(matricNumber);
     }
 
     // Payments collection
