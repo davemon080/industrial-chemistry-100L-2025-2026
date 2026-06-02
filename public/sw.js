@@ -3,20 +3,21 @@
  * Standard offline-ready installation, network pass-through, and Web Push notifications
  */
 
-const CACHE_NAME = 'ich100l-cache-v3';
+const CACHE_NAME = 'ich100l-cache-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
   '/logo-192.png',
   '/logo-512.png',
-  '/logo.svg'
+  '/logo.svg',
+  '/offline.html'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(async (cache) => {
-      console.log('[PWA SW] Resilient activation start. Pre-caching critical assets...');
+      console.log('[PWA SW] Resilient activation start. Pre-caching critical assets (including offline template)...');
       for (const url of ASSETS_TO_CACHE) {
         try {
           const response = await fetch(url);
@@ -69,44 +70,87 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Intercept standard layout & HTML navigation pages for Offline fallback
+  // Intercept standard layout & HTML navigation pages (Network-first with custom Offline fallback)
   if (event.request.mode === 'navigate' || (event.request.headers.get('accept') || '').includes('text/html')) {
     event.respondWith(
       fetch(event.request)
+        .then((response) => {
+          // If response is valid, update our root / index.html cache dynamically
+          if (response.ok && (url.pathname === '/' || url.pathname === '/index.html')) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
         .catch(async () => {
           const cache = await caches.open(CACHE_NAME);
-          const cachedResponse = await cache.match('/') || await cache.match('/index.html');
-          return cachedResponse || Response.error();
+          // 1. Try to serve the cached main page
+          const cachedMain = await cache.match('/') || await cache.match('/index.html');
+          if (cachedMain) {
+            return cachedMain;
+          }
+          // 2. Fall back to our dedicated offline screen
+          const cachedOffline = await cache.match('/offline.html');
+          if (cachedOffline) {
+            return cachedOffline;
+          }
+          return Response.error();
         })
     );
     return;
   }
 
-  // Let browser make standard request online, fallback to cache if offline (Cache first with Network update)
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Fetch fresh version in background to update cache
-        fetch(event.request)
+  // For static assets (JS, CSS, images, fonts, icons), implement a clean/strict Cache-First strategy
+  if (
+    event.request.destination === 'script' ||
+    event.request.destination === 'style' ||
+    event.request.destination === 'image' ||
+    event.request.destination === 'font' ||
+    url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.css') ||
+    url.pathname.endsWith('.png') ||
+    url.pathname.endsWith('.jpg') ||
+    url.pathname.endsWith('.svg') ||
+    url.pathname.endsWith('.ico')
+  ) {
+    event.respondWith(
+      caches.match(event.request).then((cachedResponse) => {
+        if (cachedResponse) {
+          // Return from cache instantly to keep app running fast and offline-ready
+          return cachedResponse;
+        }
+        return fetch(event.request)
           .then((networkResponse) => {
-            if (networkResponse.ok) {
-              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
+            if (networkResponse && networkResponse.status === 200) {
+              const clone = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
             }
+            return networkResponse;
           })
-          .catch(() => {});
-        return cachedResponse;
-      }
+          .catch(() => Response.error());
+      })
+    );
+    return;
+  }
 
-      return fetch(event.request)
-        .then((networkResponse) => {
-          if (networkResponse.ok && (event.request.destination === 'image' || event.request.destination === 'font')) {
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+  // Fallback for list of items or miscellaneous resources: Network-first, stale falls back to Cache
+  event.respondWith(
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.ok) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        return caches.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
           }
-          return networkResponse;
-        })
-        .catch(() => Response.error());
-    })
+          return Response.error();
+        });
+      })
   );
 });
 

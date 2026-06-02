@@ -372,7 +372,9 @@ app.use("/uploads", express.static(uploadDir));
         return res.json({ success: true, count: 0, message: "No devices found matching the selected targeting filters." });
       }
 
-      const payload = JSON.stringify({ title, body, category });
+      // Generate standard high-entropy unique tag identifiers to allow stacking on iOS/Android notifications tray
+      const pushId = `ich-alert-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const payload = JSON.stringify({ id: pushId, title, body, category });
       let successfulCount = 0;
       const sendPromises = matchingTargets.map(async (target) => {
         try {
