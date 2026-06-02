@@ -387,19 +387,10 @@ app.use("/uploads", express.static(uploadDir));
           });
           successfulCount++;
         } catch (error: any) {
-          // Check for expired or inactive registrations (Status 410 or 404)
+          // Log expired or inactive registrations for monitoring, but do not aggressively delete
+          // the master database document to prevent permanent subscription loss on temporary drops
           if (error.statusCode === 410 || error.statusCode === 404) {
-            console.log(`[WebPush] Pruning expired subscription for ID ${target.id} sourced from ${target.source}`);
-            try {
-              if (target.source.includes("push-subscriptions")) {
-                await deleteDoc(doc(db, "push-subscriptions", target.id));
-              }
-              if (target.source.includes("devices")) {
-                await setDoc(doc(db, "devices", target.id), { subscription: null }, { merge: true });
-              }
-            } catch (pruningError) {
-              console.error("[WebPush] Failed to prune subscription:", pruningError);
-            }
+            console.warn(`[WebPush] Subscription marked inactive or expired on push service side for ID: ${target.id} (sourced from ${target.source}, statusCode: ${error.statusCode})`);
           } else {
             console.error(`[WebPush] Push execution failed for target ID: ${target.id}`, error);
           }

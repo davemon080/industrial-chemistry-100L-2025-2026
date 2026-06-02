@@ -1259,35 +1259,29 @@ export default function App() {
         };
 
         if ('Notification' in window && Notification.permission === 'granted') {
-          // If the app is active and visible, we already show the beautiful custom sliding toast banner.
-          // To prevent double-notifying on iOS/Android (and avoid cluttering the system tray while actively using the app),
-          // we only trigger a native system alert popup if the app is currently in the background or inactive.
-          if (document.visibilityState !== 'visible') {
-            if ('serviceWorker' in navigator) {
-              navigator.serviceWorker.ready
-                .then(async (reg) => {
-                  try {
-                    await reg.showNotification(title, options);
-                    console.log('[AppClient] Successfully served native PWA popup notification on device.');
-                  } catch (notifErr) {
-                    console.warn('[AppClient] SW showNotification failed, using fallback standard Notification API:', notifErr);
-                    try {
-                      new Notification(title, options);
-                    } catch (e) {}
-                  }
-                })
-                .catch(() => {
+          // Trigger actual device/native system popup notification in any position (foreground or background)
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.ready
+              .then(async (reg) => {
+                try {
+                  await reg.showNotification(title, options);
+                  console.log('[AppClient] Successfully served native PWA popup notification on device.');
+                } catch (notifErr) {
+                  console.warn('[AppClient] SW showNotification failed, using fallback standard Notification API:', notifErr);
                   try {
                     new Notification(title, options);
                   } catch (e) {}
-                });
-            } else {
-              try {
-                new Notification(title, options);
-              } catch (e) {}
-            }
+                }
+              })
+              .catch(() => {
+                try {
+                  new Notification(title, options);
+                } catch (e) {}
+              });
           } else {
-            console.log('[AppClient] App is in foreground. Serving premium sliding toast banner instead of cluttering system alert tray.');
+            try {
+              new Notification(title, options);
+            } catch (e) {}
           }
         }
 

@@ -169,36 +169,33 @@ self.addEventListener('push', (event) => {
       console.log('[PWA SW] Parsed JSON push payload:', data);
     } catch (e) {
       // Fallback if payload is plain text
-      data = { 
-        title: 'ICH 100L Announcements 📢', 
-        body: event.data.text() 
-      };
+      try {
+        const textPayload = event.data.text();
+        if (textPayload) {
+          data = { 
+            title: 'ICH 100L Announcements 📢', 
+            body: textPayload 
+          };
+        }
+      } catch (err) {}
       console.log('[PWA SW] Parsed plain text push payload:', data);
     }
   }
 
   const baseUrl = self.location.origin || '';
   const options = {
-    body: data.body,
+    body: data.body || '',
     icon: baseUrl + '/logo-192.png',
     badge: baseUrl + '/logo-192.png',
-    tag: data.id || 'ich-alert',
+    tag: data.id || `ich-alert-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
     data: {
       url: baseUrl + '/'
     }
   };
 
-  // Strip non-standard/high-risk properties on iOS Safari/PWA to ensure strict compatibility with APNS
-  const isIOS = /iPad|iPhone|iPod/.test(self.navigator.userAgent || '');
-  if (!isIOS) {
-    options.vibrate = [200, 100, 200];
-    options.silent = false;
-    options.sound = 'default';
-  }
-
   console.log('[PWA SW] Triggering showNotification via self.registration instance. Title:', data.title, 'Options:', options);
 
-  const notificationPromise = self.registration.showNotification(data.title, options)
+  const notificationPromise = self.registration.showNotification(data.title || 'ICH 100L Alerts 🔔', options)
     .then(() => {
       console.log('[PWA SW] showNotification completed successfully.');
     })
@@ -206,22 +203,26 @@ self.addEventListener('push', (event) => {
       console.error('[PWA SW] showNotification failed with error:', err);
     });
 
+  // Safe App Badge Update
   let badgePromise = Promise.resolve();
-  const badgingAPI = (self.navigator && 'setAppBadge' in self.navigator) ? self.navigator : (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) ? navigator : null;
-  if (badgingAPI) {
-    const badgeCount = (data && typeof data.badgeCount === 'number') ? data.badgeCount : 1;
-    console.log('[PWA SW] Setting background launcher badge to:', badgeCount);
-    badgePromise = badgingAPI.setAppBadge(badgeCount)
-      .then(() => {
-        console.log('[PWA SW] Badge updated successfully on launcher.');
-      })
-      .catch((err) => {
-        console.warn('[PWA SW] App badge set failed:', err);
-      });
+  try {
+    const badgingAPI = navigator || self.navigator || {};
+    if (badgingAPI && typeof badgingAPI.setAppBadge === 'function') {
+      const badgeCount = (data && typeof data.badgeCount === 'number') ? data.badgeCount : 1;
+      badgePromise = badgingAPI.setAppBadge(badgeCount).catch(() => {});
+    } else if (self.registration && typeof self.registration.setAppBadge === 'function') {
+      const badgeCount = (data && typeof data.badgeCount === 'number') ? data.badgeCount : 1;
+      badgePromise = self.registration.setAppBadge(badgeCount).catch(() => {});
+    }
+  } catch (badgeErr) {
+    console.warn('[PWA SW] App badge logic skipped safely:', badgeErr);
   }
 
   event.waitUntil(
-    Promise.all([notificationPromise, badgePromise])
+    Promise.all([
+      notificationPromise,
+      badgePromise
+    ])
   );
 });
 
