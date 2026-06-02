@@ -271,7 +271,7 @@ export default function ProfileView({
               
               // Call background subscription setup
               try {
-                const FALLBACK_VAPID_PUBLIC_KEY = 'BHBnOpO3flpycaCho3_7hk2ZtTucZxb1K6TnoavpdG-KBy0TciH_qXz8mYS_yZT_AVVAkjA29eBW0uOr83WT6X4';
+                const FALLBACK_VAPID_PUBLIC_KEY = 'BCSfqxfrAVW0QUx5UfxnoN_Dmqi6VASv24QkYUEv5-1F1WTmPCwBuyQWkJsqMYsUb5cNpcjuRHqDQ-fc_giWydw';
                 let vapidPublicKey = FALLBACK_VAPID_PUBLIC_KEY;
                 
                 try {

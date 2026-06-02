@@ -49,63 +49,27 @@ let vapidKeys: { publicKey: string; privateKey: string } | null = null;
 async function ensureVapidKeys() {
   if (vapidKeys) return vapidKeys;
 
-  const vapidPath = path.join(process.cwd(), "vapid-keys.json");
+  // Use the predefined, high-entropy stable key pair to prevent mismatch across multiple browser/server boots on custom domains
+  const STABLE_PUBLIC_KEY = "BCSfqxfrAVW0QUx5UfxnoN_Dmqi6VASv24QkYUEv5-1F1WTmPCwBuyQWkJsqMYsUb5cNpcjuRHqDQ-fc_giWydw";
+  const STABLE_PRIVATE_KEY = "m0SCab83yUh8mvuH-kYyoX-lzYScQUk2tE8eeVVCx8Q";
 
-  // Phase 1: Try reading from durably synchronized Cloud Firestore
+  vapidKeys = {
+    publicKey: STABLE_PUBLIC_KEY,
+    privateKey: STABLE_PRIVATE_KEY
+  };
+
+  // Sync with Firestore for parity and database records
   if (db) {
     try {
-      console.log("[Server] Fetching stable VAPID keys from Firestore...");
       const configDoc = await getDoc(doc(db, "push-config", "vapid"));
-      if (configDoc.exists()) {
-        const data = configDoc.data();
-        if (data && data.publicKey && data.privateKey) {
-          vapidKeys = {
-            publicKey: data.publicKey,
-            privateKey: data.privateKey
-          };
-          console.log("[Server] Successfully loaded stable VAPID keys from Firestore.");
-          webpush.setVapidDetails(
-            "mailto:daveimagodei@gmail.com",
-            vapidKeys.publicKey,
-            vapidKeys.privateKey
-          );
-          return vapidKeys;
-        }
+      if (!configDoc.exists()) {
+        console.log("[Server] Seeding stable Master VAPID Keypair to Firestore...");
+        await setDoc(doc(db, "push-config", "vapid"), {
+          publicKey: STABLE_PUBLIC_KEY,
+          privateKey: STABLE_PRIVATE_KEY,
+          updatedAt: new Date().toISOString()
+        });
       }
-    } catch (fbError) {
-      console.warn("[Server] Silent Firestore lookup query missed, falling back to FS:", fbError);
-    }
-  }
-
-  // Phase 2: Fallback to existing local configuration file
-  if (fs.existsSync(vapidPath)) {
-    try {
-      vapidKeys = JSON.parse(fs.readFileSync(vapidPath, "utf-8"));
-      console.log("[Server] Loaded VAPID keys from persistent file system.");
-    } catch (err) {
-      console.error("[Server] Local VAPID schema load failed, re-generating...");
-      vapidKeys = webpush.generateVAPIDKeys();
-      fs.writeFileSync(vapidPath, JSON.stringify(vapidKeys), "utf-8");
-    }
-  } else {
-    console.log("[Server] Generating fresh Master VAPID Keypairs...");
-    vapidKeys = webpush.generateVAPIDKeys();
-    try {
-      fs.writeFileSync(vapidPath, JSON.stringify(vapidKeys), "utf-8");
-    } catch (err) {
-      console.error("[Server] VAPID persistence output file failed:", err);
-    }
-  }
-
-  // Phase 3: Save newly synthesized stable key configuration back into Cloud Firestore
-  if (db && vapidKeys) {
-    try {
-      console.log("[Server] Syncing fresh stable keys to Firestore cloud configuration...");
-      await setDoc(doc(db, "push-config", "vapid"), {
-        publicKey: vapidKeys.publicKey,
-        privateKey: vapidKeys.privateKey,
-        updatedAt: new Date().toISOString()
-      });
     } catch (fbSyncError) {
       console.warn("[Server] Failed to write stable keys to Firestore:", fbSyncError);
     }
@@ -277,6 +241,9 @@ app.use("/uploads", express.static(uploadDir));
     }
 
     try {
+      // Ensure VAPID keys are initialized and set
+      await ensureVapidKeys();
+
       // Create a stable, unique document ID based on the subscription endpoint hash to allow multiple devices/browsers per student
       const endpointHash = Buffer.from(subscription.endpoint).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(-60);
       const docId = getSafeDocId(`${matricNumber || "Guest"}-${endpointHash}`);
@@ -309,6 +276,7 @@ app.use("/uploads", express.static(uploadDir));
     }
 
     try {
+      await ensureVapidKeys();
       const endpointHash = Buffer.from(subscription.endpoint).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(-60);
       const docId = getSafeDocId(`${matricNumber || "Guest"}-${endpointHash}`);
       await deleteDoc(doc(db, "push-subscriptions", docId));
@@ -331,6 +299,7 @@ app.use("/uploads", express.static(uploadDir));
     }
 
     try {
+      await ensureVapidKeys();
       const pushSubsSnap = await getDocs(collection(db, "push-subscriptions"));
       const devicesSnap = await getDocs(collection(db, "devices"));
 
