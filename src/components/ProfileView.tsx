@@ -814,7 +814,7 @@ export default function ProfileView({
             <p className="text-2xl font-display font-bold text-slate-100">
               {stats.totalActivities}
             </p>
-            <p className="text-[10px] text-slate-500 font-mono mt-0.5">across 7 weekdays</p>
+            <p className="text-[10px] text-slate-500 font-mono mt-0.5">scheduled this week</p>
           </div>
 
           <div className="glassmorphism p-4 rounded-2xl border border-slate-800/80">

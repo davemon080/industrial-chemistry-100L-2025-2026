@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Award, GraduationCap, Clock, Bell, LogOut, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 
@@ -242,6 +242,28 @@ export default function App() {
       window.removeEventListener('ich100l_deleted_activities_updated', handleDeletedActivitiesUpdated);
     };
   }, []);
+
+  const deletedActivityIds = useMemo<string[]>(() => {
+    const _ = deletedActivitiesTrigger;
+    try {
+      const stored = localStorage.getItem('ich100l_deleted_activities');
+      const list = stored ? JSON.parse(stored) : [];
+      return Array.isArray(list)
+        ? list.map((a: any) => {
+            if (!a) return null;
+            if (typeof a === 'string') return a;
+            if (typeof a === 'object' && a.id) return a.id;
+            return null;
+          }).filter(Boolean) as string[]
+        : [];
+    } catch {
+      return [];
+    }
+  }, [deletedActivitiesTrigger]);
+
+  const visibleActivities = useMemo<Activity[]>(() => {
+    return activities.filter((act) => !deletedActivityIds.includes(act.id));
+  }, [activities, deletedActivityIds]);
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
   const [trialDetails, setTrialDetails] = useState<{ isTrial: boolean; daysRemaining: number } | null>(null);
 
@@ -1041,6 +1063,58 @@ export default function App() {
     editActivity?: Activity | null;
   } | null>(null);
 
+  // In-App Popup notification banner state
+  const [activeToast, setActiveToast] = useState<{
+    id: string;
+    title: string;
+    body: string;
+    type: string;
+  } | null>(null);
+
+  // Programmatically synthesizes an elegant double marimba-like chime for real-time notification arrivals
+  const playNotificationSound = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      
+      const playTone = (freq: number, start: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, start);
+        
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.12, start + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+        
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.start(start);
+        osc.stop(start + duration);
+      };
+      
+      const now = ctx.currentTime;
+      // High-fidelity standard App notice double chord chime: E5 followed instantly by A5
+      playTone(659.25, now, 0.45);
+      playTone(880.00, now + 0.11, 0.55);
+    } catch (e) {
+      console.warn('Audio synthesis deferred:', e);
+    }
+  };
+
+  // Auto-dismiss the active sliding popup banner after a few seconds
+  useEffect(() => {
+    if (activeToast) {
+      const timer = setTimeout(() => {
+        setActiveToast(null);
+      }, 7000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeToast]);
+
   const lastNotificationsCountRef = useRef(notifications.length);
 
   // Sync to localStorage on updates and trigger native lockscreen popups (compatible with standard browsers, Android, and iOS PWA)
@@ -1051,6 +1125,25 @@ export default function App() {
     if (notifications.length > lastNotificationsCountRef.current) {
       const latestNotif = notifications[0];
       if (latestNotif && !latestNotif.isRead) {
+        // 1. Trigger the premium, high-fidelity in-app sliding popup banner!
+        setActiveToast({
+          id: latestNotif.id,
+          title: latestNotif.title,
+          body: latestNotif.body,
+          type: latestNotif.type || 'info'
+        });
+
+        // 2. Play the synthesized mobile notice double chime
+        playNotificationSound();
+
+        // 3. Trigger native mobile vibration for tactical feedback on Android
+        if ('vibrate' in navigator) {
+          try {
+            navigator.vibrate([80, 50, 80]);
+          } catch (vibErr) {}
+        }
+
+        // 4. Fall back to standard OS-level push notifications if authorized by the student
         if ('Notification' in window && Notification.permission === 'granted') {
           const title = latestNotif.title;
           const options = {
@@ -1401,7 +1494,7 @@ export default function App() {
       case 'schedule':
         return (
           <Scheduler
-            activities={activities}
+            activities={visibleActivities}
             currentUserMatric={currentUser?.matricNumber || ''}
             isCourseRep={isCourseRep}
             onDeleteActivity={handleDeleteActivity}
@@ -1414,7 +1507,7 @@ export default function App() {
       case 'calendar' as any:
         return (
           <CalendarView
-            activities={activities}
+            activities={visibleActivities}
             currentUserMatric={currentUser?.matricNumber || ''}
             onBack={() => setActiveTab('schedule')}
             onSelectDate={(date) => {
@@ -1427,7 +1520,7 @@ export default function App() {
         return (
           <DateScheduleView
             selectedDate={selectedCalendarDate || new Date()}
-            activities={activities}
+            activities={visibleActivities}
             isCourseRep={isCourseRep}
             onBackToCalendar={() => {
               setActiveTab('calendar' as any);
@@ -1471,24 +1564,30 @@ export default function App() {
             onLogout={handleLogout}
             onResetData={handleResetData}
             stats={{
-              totalActivities: activities.filter(act => {
-                try {
-                  const stored = localStorage.getItem('ich100l_deleted_activities');
-                  const deletedList = stored ? JSON.parse(stored) : [];
-                  if (Array.isArray(deletedList) && deletedList.some((d: any) => d && d.id === act.id)) {
-                    return false;
-                  }
-                } catch (e) {
-                  console.warn('Failed to parse deleted activities from stats filter:', e);
-                }
+              totalActivities: (() => {
+                const now = new Date();
+                const getYYYYMMDDForDay = (day: DayOfWeek) => {
+                  const dayIndex = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].indexOf(day);
+                  const currentDayOfWeek = now.getDay();
+                  const currentMondayOffset = (currentDayOfWeek === 0 ? 6 : currentDayOfWeek - 1);
+                  const targetDate = new Date(now);
+                  targetDate.setDate(now.getDate() - currentMondayOffset + dayIndex);
+                  const yyyy = targetDate.getFullYear();
+                  const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+                  const dd = String(targetDate.getDate()).padStart(2, '0');
+                  return `${yyyy}-${mm}-${dd}`;
+                };
 
-                if (act.date) {
-                  const actMonday = getMondayOfDateString(act.date);
-                  const currentMonday = getMondayOfCurrentWeek();
-                  return actMonday === currentMonday;
-                }
-                return true;
-              }).length,
+                return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].reduce((acc, day) => {
+                  const count = visibleActivities.filter(act => {
+                    if (act.date) {
+                      return act.date === getYYYYMMDDForDay(day as DayOfWeek);
+                    }
+                    return act.day === day;
+                  }).length;
+                  return acc + count;
+                }, 0);
+              })(),
               pendingDeadlines: deadlines.filter((d) => !(d.completedBy?.[currentUser?.matricNumber || ''] ?? d.isCompleted)).length,
               completedDeadlines: deadlines.filter((d) => (d.completedBy?.[currentUser?.matricNumber || ''] ?? d.isCompleted)).length,
               announcementCount: announcements.length
@@ -1506,7 +1605,7 @@ export default function App() {
           <NotificationsPage
             deadlines={deadlines}
             announcements={announcements}
-            activities={activities}
+            activities={visibleActivities}
             onBack={() => setActiveTab('schedule')}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             notifications={notifications}
@@ -1569,6 +1668,65 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-[#0f172a] text-slate-100 flex flex-col relative">
+      {/* Toast Notification Banner - Premium iOS / Android sliding push popup style */}
+      <AnimatePresence>
+        {activeToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -100, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 18, stiffness: 200 }}
+            className="fixed top-4 left-4 right-4 max-w-sm mx-auto z-[999999] pointer-events-auto cursor-pointer"
+            onClick={() => {
+              setActiveTab('notifications' as any);
+              setActiveToast(null);
+            }}
+          >
+            <div className="glassmorphism p-4 rounded-2xl border border-indigo-500/30 shadow-[0_12px_40px_rgba(0,0,0,0.65),0_0_20px_rgba(99,102,241,0.25)] bg-[#0f172a]/95 backdrop-blur-xl flex items-start gap-3.5 relative overflow-hidden group transition-all duration-300 hover:shadow-[0_12px_45px_rgba(0,0,0,0.7),0_0_25px_rgba(99,102,241,0.3)]">
+              {/* Pulsing ambient accent gradient glow inside */}
+              <div className="absolute inset-x-0 inset-y-0 rounded-2xl bg-gradient-to-r from-indigo-500/10 via-purple-500/5 to-violet-500/10 opacity-70 group-hover:opacity-100 transition-opacity pointer-events-none" />
+              
+              {/* Premium left side active colorful indicator pin */}
+              <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-indigo-500 via-indigo-600 to-violet-500 rounded-l-2xl animate-pulse" />
+
+              <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 shrink-0 mt-0.5 border border-indigo-500/25 group-hover:scale-105 transition-all shadow-[0_0_10px_rgba(99,102,241,0.15)]">
+                <Bell className="w-5 h-5" />
+              </div>
+
+              <div className="flex-1 min-w-0 pr-5">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-sans font-bold tracking-wider text-indigo-300 uppercase leading-none">
+                    {activeToast.title}
+                  </h4>
+                  <span className="text-[8px] font-mono font-black text-indigo-200 bg-indigo-500/15 border border-indigo-500/20 px-2.5 py-0.5 rounded-full select-none leading-none animate-pulse">
+                    Just Now
+                  </span>
+                </div>
+                <p className="text-xs text-slate-200 font-sans mt-1.5 leading-snug font-medium line-clamp-2">
+                  {activeToast.body}
+                </p>
+                <div className="mt-2 text-[9px] font-mono text-indigo-400 flex items-center gap-1 font-bold group-hover:text-indigo-300 transition-colors">
+                  <span>Tap to view noticeboard</span>
+                  <span className="text-xs leading-none shrink-0">➔</span>
+                </div>
+              </div>
+
+              {/* Absolute Close banner button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveToast(null);
+                }}
+                className="absolute top-3.5 right-3 w-5 h-5 rounded-full bg-slate-950/40 hover:bg-slate-950 text-slate-400 hover:text-white flex items-center justify-center p-0 cursor-pointer text-xs font-bold outline-none border-none transition-all duration-200 hover:scale-110 active:scale-95"
+                title="Dismiss Notice"
+              >
+                ✕
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Verification Overlays */}
       {isVerifyingURL && (
         <div className="fixed inset-0 bg-slate-950/90 z-[99999] flex flex-col items-center justify-center p-4 backdrop-blur-md">
