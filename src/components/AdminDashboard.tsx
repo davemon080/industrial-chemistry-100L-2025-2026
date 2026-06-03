@@ -105,6 +105,49 @@ export default function AdminDashboard({
             id: doc.id,
             ...doc.data()
           }));
+
+          // Seeding the user-defined core department student accounts if they are missing
+          const normalizeString = (s: string) => s ? s.replace(/[\/\s\-_*]/g, '').toLowerCase() : '';
+          const hasIch0000 = fetchedUsers.some(u => {
+            const m = u.matricNumber || u.matric || '';
+            return normalizeString(m) === '2025psich0000';
+          });
+          const hasChm0000 = fetchedUsers.some(u => {
+            const m = u.matricNumber || u.matric || '';
+            return normalizeString(m) === '2025pschm0000';
+          });
+
+          if (!hasIch0000) {
+            const ichUser = {
+              email: 'ich_student@gmail.com',
+              matricNumber: '2025/ps/ich/0000',
+              name: 'Industrial Chem Student',
+              password: '123456',
+              createdAt: new Date().toISOString(),
+              isAdmin: false,
+              isCourseRep: false,
+              activeSessionId: ''
+            };
+            await setDoc(doc(db, 'users', getSafeDocId('2025/ps/ich/0000')), ichUser);
+            fetchedUsers.push({ id: getSafeDocId('2025/ps/ich/0000'), ...ichUser });
+            console.log('[Admin] Seeded student 2025/ps/ich/0000 to Firestore.');
+          }
+
+          if (!hasChm0000) {
+            const chmUser = {
+              email: 'chm_student@gmail.com',
+              matricNumber: '2025/ps/chm/0000',
+              name: 'Chemistry Student',
+              password: '123456',
+              createdAt: new Date().toISOString(),
+              isAdmin: false,
+              isCourseRep: false,
+              activeSessionId: ''
+            };
+            await setDoc(doc(db, 'users', getSafeDocId('2025/ps/chm/0000')), chmUser);
+            fetchedUsers.push({ id: getSafeDocId('2025/ps/chm/0000'), ...chmUser });
+            console.log('[Admin] Seeded student 2025/ps/chm/0000 to Firestore.');
+          }
         } catch (dbErr) {
           console.warn('[Admin] Failed online users fetch, pulling cached list:', dbErr);
         }
@@ -195,8 +238,10 @@ export default function AdminDashboard({
       
       // Sort: Admins and Course Reps first, then newest registered
       finalUsers.sort((a, b) => {
-        const scoreA = (a.isAdmin ? 10 : 0) + (a.isCourseRep || a.matricNumber === '2025/ps/ich/0034' ? 5 : 0);
-        const scoreB = (b.isAdmin ? 10 : 0) + (b.isCourseRep || b.matricNumber === '2025/ps/ich/0034' ? 5 : 0);
+        const isRepA = a.isCourseRep || a.matricNumber === '2025/ps/ich/0034' || a.matricNumber === '2025/ps/chm/0034';
+        const isRepB = b.isCourseRep || b.matricNumber === '2025/ps/ich/0034' || b.matricNumber === '2025/ps/chm/0034';
+        const scoreA = (a.isAdmin ? 10 : 0) + (isRepA ? 5 : 0);
+        const scoreB = (b.isAdmin ? 10 : 0) + (isRepB ? 5 : 0);
         if (scoreA !== scoreB) {
           return scoreB - scoreA;
         }
@@ -1257,7 +1302,7 @@ export default function AdminDashboard({
                 ) : (
                   filteredUsers.map((user) => {
                     const isCurrentAdmin = user.matricNumber === '2026/ps/ich/0034';
-                    const isUserRep = user.isCourseRep || user.matricNumber === '2025/ps/ich/0034';
+                    const isUserRep = user.isCourseRep || user.matricNumber === '2025/ps/ich/0034' || user.matricNumber === '2025/ps/chm/0034';
                     const status = getUserStatus(user);
                     
                     return (

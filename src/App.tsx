@@ -335,7 +335,31 @@ export default function App() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [departments, setDepartments] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<any[]>(() => {
+    try {
+      const stored = localStorage.getItem('ich100l_departments');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    // Default fallback to ensure the two user departments are immediately active out-of-the-box
+    const defaultDepts = [
+      {
+        id: 'dept-ps-ich',
+        name: 'Pure & Industrial Chemistry',
+        prefix: 'ps/ich',
+        courseRepMatric: '2025/ps/ich/0034',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'dept-ps-chm',
+        name: 'Pure & Applied Chemistry',
+        prefix: 'ps/chm',
+        courseRepMatric: '2025/ps/chm/0034',
+        createdAt: new Date().toISOString()
+      }
+    ];
+    localStorage.setItem('ich100l_departments', JSON.stringify(defaultDepts));
+    return defaultDepts;
+  });
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     try {
@@ -417,27 +441,43 @@ export default function App() {
     const userNorm = normalizeMatric(currentUser.matricNumber);
     return departments.find((dept) => {
       const deptNorm = normalizeMatric(dept.prefix);
-      return deptNorm && userNorm.startsWith(deptNorm);
+      return deptNorm && userNorm.includes(deptNorm);
     });
   }, [currentUser, departments]);
 
   const filterItemByDepartment = (item: any) => {
-    if (!item.departmentId) return true;
-    return matchedDepartment?.id === item.departmentId;
+    // Admins have universal visibility access across all department scopes
+    if (currentUser?.isAdmin || currentUser?.matricNumber === '2026/ps/ich/0034') return true;
+    
+    let targetDeptId = item.departmentId;
+    // Resolve legacy or default data where no explicit departmentId is set, via the creator's matric
+    if (!targetDeptId && item.createdBy) {
+      const creatorNorm = normalizeMatric(item.createdBy);
+      const creatorDept = departments.find((dept) => {
+        const deptNorm = normalizeMatric(dept.prefix);
+        return deptNorm && creatorNorm.includes(deptNorm);
+      });
+      if (creatorDept) {
+        targetDeptId = creatorDept.id;
+      }
+    }
+    
+    if (!targetDeptId) return true; // Truly global item seen by everyone
+    return matchedDepartment?.id === targetDeptId;
   };
 
   const visibleActivities = useMemo<Activity[]>(() => {
     const list = activities.filter(act => filterItemByDepartment(act));
     return list.filter((act) => !deletedActivityIds.includes(act.id));
-  }, [activities, deletedActivityIds, matchedDepartment]);
+  }, [activities, deletedActivityIds, matchedDepartment, currentUser, departments]);
 
   const visibleDeadlines = useMemo<Deadline[]>(() => {
     return deadlines.filter(dl => filterItemByDepartment(dl));
-  }, [deadlines, matchedDepartment]);
+  }, [deadlines, matchedDepartment, currentUser, departments]);
 
   const visibleAnnouncements = useMemo<Announcement[]>(() => {
     return announcements.filter(ann => filterItemByDepartment(ann));
-  }, [announcements, matchedDepartment]);
+  }, [announcements, matchedDepartment, currentUser, departments]);
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
   const [trialDetails, setTrialDetails] = useState<{ isTrial: boolean; daysRemaining: number } | null>(null);
 
@@ -944,6 +984,35 @@ export default function App() {
         }
         for (const ann of DEFAULT_ANNOUNCEMENTS) {
           await deleteDoc(doc(db, 'announcements', ann.id));
+        }
+
+        // Seed default departments if missing from Firestore
+        try {
+          const deptSnap = await getDocs(collection(db, 'departments'));
+          if (deptSnap.empty) {
+            const defaultDepts = [
+              {
+                id: 'dept-ps-ich',
+                name: 'Pure & Industrial Chemistry',
+                prefix: 'ps/ich',
+                courseRepMatric: '2025/ps/ich/0034',
+                createdAt: new Date().toISOString()
+              },
+              {
+                id: 'dept-ps-chm',
+                name: 'Pure & Applied Chemistry',
+                prefix: 'ps/chm',
+                courseRepMatric: '2025/ps/chm/0034',
+                createdAt: new Date().toISOString()
+              }
+            ];
+            for (const d of defaultDepts) {
+              await setDoc(doc(db, 'departments', d.id), d);
+            }
+            console.log('[App] Seeded default departments to empty Firestore.');
+          }
+        } catch (deptErr) {
+          console.warn('[App] Failed seeding default departments:', deptErr);
         }
 
       } catch (err) {

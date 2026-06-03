@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
 import { 
   initializeFirestore, 
   doc, 
   getDoc, 
+  getDocFromServer,
   setDoc, 
   getDocs, 
   collection, 
@@ -20,28 +22,37 @@ import appletConfig from '../../firebase-applet-config.json';
 
 // Use the applet configuration to ensure we are connecting to the correct sandboxed database instance
 const firebaseConfig = {
-  apiKey: appletConfig.apiKey || "AIzaSyDasXOCsqxwer5TJEkw8boKtnxk_KHCT0o",
-  authDomain: appletConfig.authDomain || "ich100l.firebaseapp.com",
-  projectId: appletConfig.projectId || "ich100l",
-  storageBucket: appletConfig.storageBucket || "ich100l.firebasestorage.app",
-  messagingSenderId: appletConfig.messagingSenderId || "957173852676",
-  appId: appletConfig.appId || "1:957173852676:web:c87374af6a8e02afefa351",
-  measurementId: appletConfig.measurementId || "G-X7T2126SDY"
+  apiKey: appletConfig.apiKey,
+  authDomain: appletConfig.authDomain,
+  projectId: appletConfig.projectId,
+  storageBucket: appletConfig.storageBucket,
+  messagingSenderId: appletConfig.messagingSenderId,
+  appId: appletConfig.appId,
+  measurementId: appletConfig.measurementId || ""
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true
-}, appletConfig.firestoreDatabaseId);
+// Ensure single source of initialization to prevent duplicate app errors
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+
+const firestoreDbId = (appletConfig as any).firestoreDatabaseId || undefined;
+
+// Use initializeFirestore with experimentalForceLongPolling to prevent iframe proxy timeout / websocket disruption
+export const db = firestoreDbId
+  ? initializeFirestore(app, { experimentalForceLongPolling: true }, firestoreDbId)
+  : initializeFirestore(app, { experimentalForceLongPolling: true });
+
+export const auth = getAuth(app);
+export const DEFAULT_FIREBASE_CONFIG = appletConfig;
 
 // Test connection on boot to verify correct synchronization
-async function testConnection() {
+export async function testConnection(): Promise<{ success: boolean; error?: string }> {
   try {
-    await getDoc(doc(db, 'system-config', 'app-branding'));
-    console.log("Firebase connection initialized.");
+    await getDocFromServer(doc(db, 'system-config', 'check-connection'));
+    return { success: true };
   } catch (error) {
-    console.log("Firebase offline cache mode enabled.");
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn("Firebase Connection check: ", msg);
+    return { success: false, error: msg };
   }
 }
 testConnection();

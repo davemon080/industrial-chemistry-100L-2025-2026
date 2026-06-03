@@ -116,7 +116,7 @@ export default function AddEditPage({
       const userNorm = currentUserMatric.toLowerCase().replace(/[\/\s\-_*]/g, '');
       const matched = departments.find(dept => {
         const deptNorm = dept.prefix.toLowerCase().replace(/[\/\s\-_*]/g, '');
-        return deptNorm && userNorm.startsWith(deptNorm);
+        return deptNorm && userNorm.includes(deptNorm);
       });
       if (matched) return matched.id;
     }
@@ -345,6 +345,7 @@ export default function AddEditPage({
 
   const renderDepartmentSelector = () => {
     if (!departments || departments.length === 0) return null;
+    const isSystemAdmin = currentUserMatric === '2026/ps/ich/0034';
     return (
       <div id="dept-select-group" className="space-y-1.5 pt-1">
         <label className="block text-xs font-semibold text-slate-300 font-sans">
@@ -352,10 +353,11 @@ export default function AddEditPage({
         </label>
         <select
           value={selectedDeptId}
+          disabled={!isSystemAdmin}
           onChange={(e) => setSelectedDeptId(e.target.value)}
-          className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-sans cursor-pointer"
+          className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-sans cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
         >
-          <option value="">All Students (General Class) 🌍</option>
+          {isSystemAdmin && <option value="">All Students (General Class) 🌍</option>}
           {departments.map((dept) => (
             <option key={dept.id} value={dept.id}>
               {dept.name} ({dept.prefix})
@@ -363,7 +365,9 @@ export default function AddEditPage({
           ))}
         </select>
         <p className="text-[10px] text-slate-400 font-sans font-medium italic select-none">
-          If selected, only students with matching matric prefixes can see this and receive push alerts.
+          {!isSystemAdmin 
+            ? "Locked to your assigned department. Only System Admins can publish across all departments."
+            : "If selected, only students with matching matric prefixes can see this and receive push alerts."}
         </p>
       </div>
     );

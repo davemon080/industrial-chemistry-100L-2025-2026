@@ -168,9 +168,18 @@ export default function ProfileView({
   const [subPaySuccess, setSubPaySuccess] = useState('');
 
   // OTA Update States
-  const [updateStep, setUpdateStep] = useState<'idle' | 'checking' | 'available' | 'updating' | 'success'>('available');
+  const [currentVersion, setCurrentVersion] = useState<string>(() => {
+    return localStorage.getItem('ich100l_ota_version') || '1.2.0';
+  });
+  const [updateStep, setUpdateStep] = useState<'idle' | 'checking' | 'available' | 'updating' | 'success'>(() => {
+    const version = localStorage.getItem('ich100l_ota_version') || '1.2.0';
+    return version === '1.3.5' ? 'idle' : 'available';
+  });
   const [updatePercent, setUpdatePercent] = useState(0);
-  const [updateStatusText, setUpdateStatusText] = useState('New version available (v1.3.5)');
+  const [updateStatusText, setUpdateStatusText] = useState(() => {
+    const version = localStorage.getItem('ich100l_ota_version') || '1.2.0';
+    return version === '1.3.5' ? 'Your app is fully optimized' : 'New version available (v1.3.5)';
+  });
 
   // Notification capabilities checking & iOS alignment handler
   const [permissionStatus, setPermissionStatus] = useState<string>('default');
@@ -819,6 +828,7 @@ export default function ProfileView({
         setUpdateStep('success');
         setUpdateStatusText('Update installed successfully! Restarting runtime...');
         setTimeout(() => {
+          localStorage.setItem('ich100l_ota_version', '1.3.5');
           window.location.reload();
         }, 1200);
       } else {
@@ -1415,13 +1425,35 @@ export default function ProfileView({
                 </div>
                 <div>
                   <h4 className="text-sm font-sans font-medium text-slate-200">App Version & Update Hub</h4>
-                  <p className="text-xs text-slate-500 font-sans">Current: v1.2.0 • Latest: v1.3.5</p>
+                  <p className="text-xs text-slate-500 font-sans">Current: v{currentVersion} • Latest: v1.3.5</p>
                 </div>
               </div>
-              <span className="text-[10px] font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 uppercase select-none animate-pulse">
-                Update Available
-              </span>
+              {currentVersion !== '1.3.5' ? (
+                <span className="text-[10px] font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 uppercase select-none animate-pulse">
+                  Update Available
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/15 text-emerald-400 uppercase select-none">
+                  Up To Date
+                </span>
+              )}
             </div>
+
+            {updateStep === 'idle' && (
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-900 text-xs text-slate-300 font-sans leading-relaxed">
+                  ✨ Excellent! Your application runtime is fully updated to <strong className="text-emerald-400">v1.3.5</strong>. All physical and online chemistry schedules, department segment routing, and push notification modules are operating at peak efficiency.
+                </div>
+                <button
+                  type="button"
+                  disabled
+                  className="w-full py-2.5 rounded-xl bg-slate-900/50 border border-slate-850 text-slate-400 text-xs font-bold font-sans flex items-center justify-center gap-2 cursor-not-allowed select-none outline-none"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>Fully Up To Date (v1.3.5)</span>
+                </button>
+              </div>
+            )}
 
             {updateStep === 'available' && (
               <div className="space-y-3">

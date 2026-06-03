@@ -13,26 +13,58 @@ import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 
 const getUsersDB = () => {
   try {
-    const db = localStorage.getItem('ich100l_users_db');
-    if (db) return JSON.parse(db);
-    // Seed with Course Rep password to 123456 as requested
-    const defaultDB = {
-      [DEFAULT_COURSE_REP_MATRIC]: {
-        email: 'daveimagodei@gmail.com',
-        matricNumber: DEFAULT_COURSE_REP_MATRIC,
-        name: 'David Adebayo',
+    const dbStr = localStorage.getItem('ich100l_users_db');
+    let currentDB: any = {};
+    if (dbStr) {
+      currentDB = JSON.parse(dbStr);
+    } else {
+      currentDB = {
+        [DEFAULT_COURSE_REP_MATRIC]: {
+          email: 'daveimagodei@gmail.com',
+          matricNumber: DEFAULT_COURSE_REP_MATRIC,
+          name: 'David Adebayo',
+          password: '123456',
+          isCourseRep: true,
+        },
+        '2026/ps/ich/0034': {
+          email: 'admin@gmail.com',
+          matricNumber: '2026/ps/ich/0034',
+          name: 'System Admin',
+          password: '123456',
+          isAdmin: true,
+        }
+      };
+    }
+
+    // Ensure requested student accounts are always established
+    let updated = false;
+    if (!currentDB['2025/ps/ich/0000']) {
+      currentDB['2025/ps/ich/0000'] = {
+        email: 'ich_student@gmail.com',
+        matricNumber: '2025/ps/ich/0000',
+        name: 'Industrial Chem Student',
         password: '123456',
-      },
-      '2026/ps/ich/0034': {
-        email: 'admin@gmail.com',
-        matricNumber: '2026/ps/ich/0034',
-        name: 'System Admin',
+        isAdmin: false,
+        isCourseRep: false,
+      };
+      updated = true;
+    }
+    if (!currentDB['2025/ps/chm/0000']) {
+      currentDB['2025/ps/chm/0000'] = {
+        email: 'chm_student@gmail.com',
+        matricNumber: '2025/ps/chm/0000',
+        name: 'Chemistry Student',
         password: '123456',
-        isAdmin: true,
-      }
-    };
-    localStorage.setItem('ich100l_users_db', JSON.stringify(defaultDB));
-    return defaultDB;
+        isAdmin: false,
+        isCourseRep: false,
+      };
+      updated = true;
+    }
+
+    if (updated || !dbStr) {
+      localStorage.setItem('ich100l_users_db', JSON.stringify(currentDB));
+    }
+    return currentDB;
   } catch {
     return {};
   }
@@ -408,18 +440,24 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       setIsAuthenticating(false);
     } else {
       // Setup dynamic account if they use course rep matric representing fresh first login
-      if (cleanedMatric.toLowerCase() === DEFAULT_COURSE_REP_MATRIC.toLowerCase()) {
+      const isIchRep = cleanedMatric.toLowerCase() === DEFAULT_COURSE_REP_MATRIC.toLowerCase();
+      const isChmRep = cleanedMatric.toLowerCase() === '2025/ps/chm/0034';
+      if (isIchRep || isChmRep) {
+        const targetMatric = isChmRep ? '2025/ps/chm/0034' : DEFAULT_COURSE_REP_MATRIC;
+        const targetName = isChmRep ? 'Chemistry Course Rep' : 'David Adebayo';
+        const targetEmail = isChmRep ? 'chm_rep@gmail.com' : 'daveimagodei@gmail.com';
+        
         const defaultRep = {
-          email: email.trim() || 'daveimagodei@gmail.com',
-          matricNumber: DEFAULT_COURSE_REP_MATRIC,
-          name: 'David Adebayo',
+          email: email.trim() || targetEmail,
+          matricNumber: targetMatric,
+          name: targetName,
           password: password,
           createdAt: new Date().toISOString(),
           activeSessionId: sessionId,
           isCourseRep: true,
         };
         try {
-          await setDoc(doc(db, 'users', getSafeDocId(DEFAULT_COURSE_REP_MATRIC)), defaultRep);
+          await setDoc(doc(db, 'users', getSafeDocId(targetMatric)), defaultRep);
         } catch (err) {
           console.error(err);
         }
