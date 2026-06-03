@@ -36,9 +36,17 @@ export default function AdminDashboard({
   const [isRevokingSub, setIsRevokingSub] = useState<string | null>(null);
 
   // Bottom navigation state
-  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'settings' | 'feedback'>('dashboard');
+  const [activeAdminTab, setActiveAdminTab] = useState<'dashboard' | 'settings' | 'feedback' | 'departments'>('dashboard');
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [unreadFeedbacksCount, setUnreadFeedbacksCount] = useState(0);
+
+  // Departments management state variables
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [deptName, setDeptName] = useState('');
+  const [deptPrefix, setDeptPrefix] = useState('');
+  const [deptCourseRepMatric, setDeptCourseRepMatric] = useState('');
+  const [isSavingDept, setIsSavingDept] = useState(false);
+  const [editingDeptId, setEditingDeptId] = useState<string | null>(null);
 
   // Password reset/management states
   const [currentPassword, setCurrentPassword] = useState('');
@@ -390,6 +398,35 @@ export default function AdminDashboard({
     return () => unsubscribe();
   }, []);
 
+  // Listen to live departments
+  useEffect(() => {
+    let unsubscribe = () => {};
+    if (db) {
+      try {
+        unsubscribe = onSnapshot(collection(db, 'departments'), (snapshot) => {
+          const deptsList: any[] = [];
+          snapshot.forEach((doc) => {
+            deptsList.push({ ...doc.data(), id: doc.id });
+          });
+          setDepartments(deptsList);
+          localStorage.setItem('ich100l_departments', JSON.stringify(deptsList));
+        }, (err) => {
+          console.warn('[Admin] Live departments fetch fallback:', err);
+        });
+      } catch (err) {
+        console.error('[Admin] Live departments onSnapshot subscription failed:', err);
+      }
+    } else {
+      const stored = localStorage.getItem('ich100l_departments');
+      if (stored) {
+        try {
+          setDepartments(JSON.parse(stored));
+        } catch (_) {}
+      }
+    }
+    return () => unsubscribe();
+  }, []);
+
   // Clear toast feedback
   useEffect(() => {
     if (actionFeedback) {
@@ -447,6 +484,135 @@ export default function AdminDashboard({
       setActionFeedback({
         type: 'error',
         message: 'Failed to update course representative authorization.'
+      });
+    }
+  };
+
+  // Create or Edit Department configuration mapping
+  const handleSaveDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deptName.trim() || !deptPrefix.trim()) {
+      setActionFeedback({
+        type: 'error',
+        message: 'Please fill in both the Department name and Matric prefix.'
+      });
+      return;
+    }
+
+    setIsSavingDept(true);
+    setActionFeedback(null);
+
+    const targetPrefix = deptPrefix.trim();
+    const dId = editingDeptId || `dept-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    try {
+      const deptData = {
+        id: dId,
+        name: deptName.trim(),
+        prefix: targetPrefix,
+        courseRepMatric: deptCourseRepMatric || '',
+        createdAt: new Date().toISOString()
+      };
+
+      // 1. Save doc to Firestore online/offline rules
+      if (db) {
+        try {
+          await setDoc(doc(db, 'departments', dId), deptData);
+        } catch (fsErr) {
+          handleFirestoreError(fsErr, OperationType.WRITE, `departments/${dId}`);
+        }
+      }
+
+      // 2. Local memory update
+      let updatedDepts = [...departments];
+      if (editingDeptId) {
+        updatedDepts = updatedDepts.map(d => d.id === dId ? deptData : d);
+      } else {
+        updatedDepts.push(deptData);
+      }
+      setDepartments(updatedDepts);
+      localStorage.setItem('ich100l_departments', JSON.stringify(updatedDepts));
+
+      // 3. Promote newly appointed representative user
+      if (deptCourseRepMatric) {
+        try {
+          if (db) {
+            await setDoc(doc(db, 'users', getSafeDocId(deptCourseRepMatric)), { isCourseRep: true }, { merge: true });
+          }
+          // Sync state users locally
+          setUsers(prev => prev.map(u => u.matricNumber === deptCourseRepMatric ? { ...u, isCourseRep: true } : u));
+          
+          // Sync local storage users
+          const stored = localStorage.getItem('ich100l_users_db');
+          const localDB = stored ? JSON.parse(stored) : {};
+          if (localDB[deptCourseRepMatric]) {
+            localDB[deptCourseRepMatric].isCourseRep = true;
+            localStorage.setItem('ich100l_users_db', JSON.stringify(localDB));
+          }
+        } catch (promoErr) {
+          console.warn('[Admin] Failed to promote Representative profile:', promoErr);
+        }
+      }
+
+      // Reset Form State
+      setDeptName('');
+      setDeptPrefix('');
+      setDeptCourseRepMatric('');
+      setEditingDeptId(null);
+
+      setActionFeedback({
+        type: 'success',
+        message: editingDeptId 
+          ? `Updated mapping rules for ${deptData.name}.`
+          : `Established new academic department: ${deptData.name}.`
+      });
+
+    } catch (err) {
+      console.error(err);
+      setActionFeedback({
+        type: 'error',
+        message: 'Could not write department mappings to local memory or cloud servers.'
+      });
+    } finally {
+      setIsSavingDept(false);
+    }
+  };
+
+  // Start editing mode for a department
+  const handleStartEditDepartment = (dept: any) => {
+    setEditingDeptId(dept.id);
+    setDeptName(dept.name);
+    setDeptPrefix(dept.prefix);
+    setDeptCourseRepMatric(dept.courseRepMatric || '');
+    
+    // Switch to Department tab if clicked from elsewhere, though already inside it
+    setActiveAdminTab('departments');
+  };
+
+  // Delete department map
+  const handleDeleteDepartment = async (id: string, name: string) => {
+    try {
+      if (db) {
+        try {
+          await deleteDoc(doc(db, 'departments', id));
+        } catch (fsErr) {
+          handleFirestoreError(fsErr, OperationType.DELETE, `departments/${id}`);
+        }
+      }
+
+      const updated = departments.filter(d => d.id !== id);
+      setDepartments(updated);
+      localStorage.setItem('ich100l_departments', JSON.stringify(updated));
+
+      setActionFeedback({
+        type: 'success',
+        message: `Removed ${name} department map configuration.`
+      });
+    } catch (err) {
+      console.error(err);
+      setActionFeedback({
+        type: 'error',
+        message: 'Failed to purge department map registry.'
       });
     }
   };
@@ -1272,6 +1438,176 @@ export default function AdminDashboard({
             }}
             isAdminMode={true}
           />
+        ) : activeAdminTab === 'departments' ? (
+          <div className="max-w-4xl mx-auto space-y-6 pb-32">
+            <div className="flex items-center gap-2 border-b border-slate-900/60 pb-2.5">
+              <GraduationCap className="w-5 h-5 text-indigo-400 shrink-0" />
+              <div>
+                <h3 className="text-sm font-display font-medium text-slate-100">Department Management System</h3>
+                <p className="text-[10px] text-slate-505 font-sans mt-0.5">Define academic department routes, matric prefix mapping pattern rules, and assign Course Representatives.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              {/* Card 1: Add / Edit Form */}
+              <GlassCard className="p-5 bg-slate-950/60 border-slate-900 relative">
+                <div className="absolute top-0 right-0 w-24 h-1 bg-gradient-to-l from-indigo-550 via-purple-550 to-indigo-400" />
+                
+                <h4 className="text-xs font-mono font-bold text-slate-200 uppercase tracking-wider mb-4 flex items-center gap-1.5 select-none">
+                  <Database className="w-4 h-4 text-indigo-400" /> 
+                  {editingDeptId ? 'Edit Mapping Configuration' : 'Establish Department Rule'}
+                </h4>
+
+                <form onSubmit={handleSaveDepartment} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">Department Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      value={deptName}
+                      onChange={(e) => setDeptName(e.target.value)}
+                      placeholder="e.g., Pure & Applied Chemistry"
+                      className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder:text-slate-650 font-sans"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">Matric Prefix Pattern</label>
+                    <input
+                      type="text"
+                      required
+                      value={deptPrefix}
+                      onChange={(e) => setDeptPrefix(e.target.value)}
+                      placeholder="e.g., ps/chm"
+                      className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder:text-slate-650 font-sans font-medium"
+                    />
+                    <span className="text-[9px] text-slate-500 italic block mt-1 font-sans">
+                      Will be matched against student matric numbers (e.g., PS/CHM/0001) to automatically assign them to this department.
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">Assign Course Representative</label>
+                    <select
+                      value={deptCourseRepMatric}
+                      onChange={(e) => setDeptCourseRepMatric(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-850 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 font-sans"
+                    >
+                      <option value="">-- Select student as Course Rep (Optional) --</option>
+                      {users
+                        .filter(u => !u.isAdmin)
+                        .map(u => (
+                          <option key={u.matricNumber} value={u.matricNumber}>
+                            {u.name} ({u.matricNumber})
+                          </option>
+                        ))}
+                    </select>
+                    <span className="text-[9px] text-slate-500 italic block mt-1 font-sans">
+                      Assigning a student makes them a Course Representative with broadcasting and scheduling privileges for this department.
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    {editingDeptId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingDeptId(null);
+                          setDeptName('');
+                          setDeptPrefix('');
+                          setDeptCourseRepMatric('');
+                        }}
+                        className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-850 text-slate-300 rounded-xl text-xs font-mono font-bold transition-all cursor-pointer box-border select-none border border-slate-855 outline-none"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={isSavingDept || !deptName.trim() || !deptPrefix.trim()}
+                      className="flex-1 py-2.5 bg-gradient-to-r from-indigo-550 to-indigo-650 hover:from-indigo-450 hover:to-indigo-550 disabled:opacity-50 text-white font-sans font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer border border-indigo-300/10 outline-none select-none"
+                    >
+                      {isSavingDept ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Plus className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isSavingDept ? 'Establishing Rule...' : editingDeptId ? 'Update Config' : 'Create Map Rule'}</span>
+                    </button>
+                  </div>
+                </form>
+              </GlassCard>
+
+              {/* Card 2: List Established Mappings */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-mono font-bold text-slate-450 uppercase tracking-widest pl-1 select-none">
+                  Established Departments ({departments.length})
+                </h4>
+
+                {departments.length === 0 ? (
+                  <GlassCard className="p-8 text-center border-slate-900 bg-slate-950/20">
+                    <GraduationCap className="w-8 h-8 text-slate-600 mx-auto mb-3 opacity-50" />
+                    <p className="text-xs text-slate-500 font-sans">No custom departments established yet.</p>
+                    <p className="text-[10px] text-slate-600 font-sans mt-1">Configure your first department prefix in the form to begin routing student activity schedules.</p>
+                  </GlassCard>
+                ) : (
+                  departments.map(dept => {
+                    const repUser = users.find(u => u.matricNumber === dept.courseRepMatric);
+                    return (
+                      <div key={dept.id}>
+                        <GlassCard className="p-4 bg-slate-950/40 border-slate-900/40 transition-all hover:bg-slate-950/60">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-2 min-w-0 flex-1">
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h5 className="text-xs font-sans font-bold text-slate-200">{dept.name}</h5>
+                                  <span className="text-[9px] font-mono font-extrabold px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/15 text-indigo-400 uppercase select-none">
+                                    {dept.prefix}
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-500 font-sans mt-0.5">Route ID: <span className="font-mono text-slate-400">{dept.id}</span></p>
+                              </div>
+
+                              <div className="p-2 bg-slate-950/70 border border-slate-900 rounded-xl flex items-center gap-2">
+                                <ShieldCheck className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                                <div className="min-w-0">
+                                  <h6 className="text-[10px] font-sans font-medium text-slate-300 truncate">
+                                    {repUser ? `Rep: ${repUser.name}` : 'No Course Rep assigned'}
+                                  </h6>
+                                  <p className="text-[9px] text-slate-500 font-mono truncate">
+                                    {dept.courseRepMatric || 'Add representative to delegate permissions'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditDepartment(dept)}
+                                className="p-1.5 bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-white border border-slate-850 hover:border-slate-800 rounded-lg transition-all cursor-pointer select-none outline-none"
+                                title="Edit Mapping Configuration"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDepartment(dept.id, dept.name)}
+                                className="p-1.5 bg-slate-950 hover:bg-rose-950/40 text-slate-500 hover:text-rose-450 border border-slate-850 hover:border-rose-500/30 rounded-lg transition-all cursor-pointer select-none outline-none"
+                                title="Delete Department Mapping"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </GlassCard>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="max-w-md mx-auto space-y-4 pb-32">
             <div className="flex items-center gap-2 border-b border-slate-900 pb-2">
@@ -1722,7 +2058,7 @@ export default function AdminDashboard({
       {/* Floating Bottom Navigation Menu for Admin */}
       <nav
         id="admin-bottom-navigation"
-        className="fixed bottom-6 left-4 right-4 z-40 max-w-[340px] mx-auto bg-slate-950/80 backdrop-blur-xl border border-slate-850/90 rounded-full px-5 py-0.5 shadow-[0_15px_35px_rgba(0,0,0,0.6)]"
+        className="fixed bottom-6 left-4 right-4 z-40 max-w-[420px] mx-auto bg-slate-950/80 backdrop-blur-xl border border-slate-850/90 rounded-full px-5 py-0.5 shadow-[0_15px_35px_rgba(0,0,0,0.6)]"
       >
         <div className="flex items-center justify-around">
           <button
@@ -1776,6 +2112,31 @@ export default function AdminDashboard({
               Feedback
             </span>
             {activeAdminTab === 'feedback' && (
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-indigo-400 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveAdminTab('departments')}
+            className="relative flex flex-col items-center justify-center py-1 px-4 transition-all duration-300 rounded-xl outline-none cursor-pointer"
+          >
+            <div
+              className={`flex items-center justify-center p-1.5 rounded-lg transition-all duration-300 ${
+                activeAdminTab === 'departments'
+                  ? 'text-indigo-400 bg-indigo-500/10'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <GraduationCap className="w-4 h-4" />
+            </div>
+            <span
+              className={`text-[9.5px] mt-0.5 font-medium tracking-wide font-sans transition-colors duration-300 ${
+                activeAdminTab === 'departments' ? 'text-indigo-300' : 'text-slate-500'
+              }`}
+            >
+              Depts
+            </span>
+            {activeAdminTab === 'departments' && (
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-indigo-400 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.8)]" />
             )}
           </button>
