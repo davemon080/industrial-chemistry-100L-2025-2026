@@ -61,17 +61,22 @@ function isRecentlyCreatedCustomId(id: string): boolean {
   return false;
 }
 
-const triggerPushNotification = async (title: string, body: string, category: string) => {
+const triggerPushNotification = async (title: string, body: string, category: string, departmentId?: string) => {
   try {
     await fetch('/api/send-broadcast-push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, body, category })
+      body: JSON.stringify({ title, body, category, departmentId })
     });
   } catch (err) {
     console.warn('Failed to trigger background push notification:', err);
   }
 };
+
+function normalizeMatric(str: string): string {
+  if (!str) return '';
+  return str.trim().toLowerCase().replace(/[\/\s\-_*]/g, '');
+}
 
 function getMondayOfDateString(dateStr: string): string {
   if (!dateStr) return '';
@@ -122,7 +127,8 @@ const registerDeviceInFirestore = async (user?: User | null, isInstalledEvent = 
 
     const userAgent = navigator.userAgent || '';
     let platform = 'Web';
-    if (/iPad|iPhone|iPod/.test(userAgent)) {
+    const isIOSDevice = /iPad|iPhone|iPod/.test(userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2 && /Macintosh/.test(userAgent));
+    if (isIOSDevice) {
       platform = 'iOS';
     } else if (/Android/.test(userAgent)) {
       platform = 'Android';
@@ -249,12 +255,41 @@ export default function App() {
         reg.pushManager.getSubscription().then((sub) => {
           if (sub) {
             const rawSubJSON = sub.toJSON();
+
+            // Extremely robust key parsing fallback for some specific WebKit/Blink versions
+            let p256dhVal = rawSubJSON.keys?.p256dh || '';
+            let authVal = rawSubJSON.keys?.auth || '';
+
+            if (!p256dhVal && typeof sub.getKey === 'function') {
+              try {
+                const p256dhBuffer = sub.getKey('p256dh');
+                if (p256dhBuffer) {
+                  p256dhVal = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(p256dhBuffer))))
+                    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                }
+              } catch (errKey) {
+                console.warn('[WebPush] getKey p256dh error:', errKey);
+              }
+            }
+
+            if (!authVal && typeof sub.getKey === 'function') {
+              try {
+                const authBuffer = sub.getKey('auth');
+                if (authBuffer) {
+                  authVal = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(authBuffer))))
+                    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+                }
+              } catch (errKey) {
+                console.warn('[WebPush] getKey auth error:', errKey);
+              }
+            }
+
             const serializedSub = {
               endpoint: sub.endpoint || rawSubJSON.endpoint,
               expirationTime: sub.expirationTime || rawSubJSON.expirationTime || null,
               keys: {
-                p256dh: rawSubJSON.keys?.p256dh || '',
-                auth: rawSubJSON.keys?.auth || ''
+                p256dh: p256dhVal,
+                auth: authVal
               }
             };
 
@@ -262,7 +297,8 @@ export default function App() {
                                  (navigator as any).standalone === true;
             const userAgent = navigator.userAgent || '';
             let platform = 'Web';
-            if (/iPad|iPhone|iPod/.test(userAgent)) {
+            const isIOSDevice = /iPad|iPhone|iPod/.test(userAgent) || (window.navigator.maxTouchPoints && window.navigator.maxTouchPoints > 2 && /Macintosh/.test(userAgent));
+            if (isIOSDevice) {
               platform = 'iOS';
             } else if (/Android/.test(userAgent)) {
               platform = 'Android';
@@ -299,6 +335,7 @@ export default function App() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [departments, setDepartments] = useState<any[]>([]);
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => {
     try {
@@ -375,9 +412,32 @@ export default function App() {
     }
   }, [deletedActivitiesTrigger]);
 
+  const matchedDepartment = useMemo(() => {
+    if (!currentUser?.matricNumber || departments.length === 0) return null;
+    const userNorm = normalizeMatric(currentUser.matricNumber);
+    return departments.find((dept) => {
+      const deptNorm = normalizeMatric(dept.prefix);
+      return deptNorm && userNorm.startsWith(deptNorm);
+    });
+  }, [currentUser, departments]);
+
+  const filterItemByDepartment = (item: any) => {
+    if (!item.departmentId) return true;
+    return matchedDepartment?.id === item.departmentId;
+  };
+
   const visibleActivities = useMemo<Activity[]>(() => {
-    return activities.filter((act) => !deletedActivityIds.includes(act.id));
-  }, [activities, deletedActivityIds]);
+    const list = activities.filter(act => filterItemByDepartment(act));
+    return list.filter((act) => !deletedActivityIds.includes(act.id));
+  }, [activities, deletedActivityIds, matchedDepartment]);
+
+  const visibleDeadlines = useMemo<Deadline[]>(() => {
+    return deadlines.filter(dl => filterItemByDepartment(dl));
+  }, [deadlines, matchedDepartment]);
+
+  const visibleAnnouncements = useMemo<Announcement[]>(() => {
+    return announcements.filter(ann => filterItemByDepartment(ann));
+  }, [announcements, matchedDepartment]);
   const [subscriptionDetails, setSubscriptionDetails] = useState<any>(null);
   const [trialDetails, setTrialDetails] = useState<{ isTrial: boolean; daysRemaining: number } | null>(null);
 
@@ -1065,6 +1125,21 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
+  // Listen to Firestore real-time updates for departments
+  useEffect(() => {
+    if (!currentUser) return;
+    const unsubscribe = onSnapshot(collection(db, 'departments'), (snapshot) => {
+      const depts: any[] = [];
+      snapshot.forEach((doc) => {
+        depts.push({ ...doc.data(), id: doc.id });
+      });
+      setDepartments(depts);
+    }, (error) => {
+      console.warn('Firestore listening to departments failed:', error);
+    });
+    return () => unsubscribe();
+  }, [currentUser]);
+
   // Periodic background check for live classes, ended classes, and deadline reminders with zero redundant notifications
   useEffect(() => {
     if (!currentUser) return;
@@ -1402,13 +1477,13 @@ export default function App() {
   };
 
   // Activity management actions
-  const handleAddActivity = async (newAct: Omit<Activity, 'id' | 'createdBy'>) => {
+  const handleAddActivity = async (newAct: Omit<Activity, 'id' | 'createdBy'> & { departmentId?: string }) => {
     const actId = `act-custom-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const act: Activity = {
       ...newAct,
       id: actId,
       createdBy: currentUser?.matricNumber || 'Rep'
-    };
+    } as any;
     try {
       await setDoc(doc(db, 'activities', actId), cleanData(act));
     } catch (err) {
@@ -1431,11 +1506,11 @@ export default function App() {
     };
     setNotifications((prev) => [notif, ...prev]);
 
-    // Async push alert
-    triggerPushNotification(notif.title, notif.body, 'schedule');
+    // Async push alert with departmentId constraint
+    triggerPushNotification(notif.title, notif.body, 'schedule', act.departmentId);
   };
 
-  const handleUpdateActivity = async (id: string, updatedAct: Omit<Activity, 'id' | 'createdBy'>) => {
+  const handleUpdateActivity = async (id: string, updatedAct: Omit<Activity, 'id' | 'createdBy'> & { departmentId?: string }) => {
     try {
       const docRef = doc(db, 'activities', id);
       await setDoc(docRef, cleanData({ ...updatedAct, id, createdBy: currentUser?.matricNumber || 'Rep' }), { merge: true });
@@ -1481,7 +1556,7 @@ export default function App() {
     }
   };
 
-  const handleAddDeadline = async (newDl: Omit<Deadline, 'id' | 'isCompleted' | 'createdBy'>) => {
+  const handleAddDeadline = async (newDl: Omit<Deadline, 'id' | 'isCompleted' | 'createdBy'> & { departmentId?: string }) => {
     const dlId = `dl-custom-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const dl: Deadline = {
       ...newDl,
@@ -1511,8 +1586,8 @@ export default function App() {
     };
     setNotifications((prev) => [notif, ...prev]);
 
-    // Async push alert
-    triggerPushNotification(notif.title, notif.body, 'deadlines');
+    // Async push alert with department restriction
+    triggerPushNotification(notif.title, notif.body, 'deadlines', dl.departmentId);
   };
 
   const handleDeleteDeadline = async (id: string) => {
@@ -1525,7 +1600,7 @@ export default function App() {
   };
 
   // Announcement management actions
-  const handleAddAnnouncement = async (newAnn: Omit<Announcement, 'id' | 'date' | 'author'>) => {
+  const handleAddAnnouncement = async (newAnn: Omit<Announcement, 'id' | 'date' | 'author'> & { departmentId?: string }) => {
     const today = new Date();
     const dateFormatted = today.toISOString().split('T')[0];
     const annId = `ann-custom-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -1557,8 +1632,8 @@ export default function App() {
     };
     setNotifications((prev) => [notif, ...prev]);
 
-    // Async push alert
-    triggerPushNotification(notif.title, notif.body, 'announcements');
+    // Async push alert with department constraint
+    triggerPushNotification(notif.title, notif.body, 'announcements', ann.departmentId);
   };
 
   const handleDeleteAnnouncement = async (id: string) => {
@@ -1675,7 +1750,7 @@ export default function App() {
       case 'deadlines':
         return (
           <Deadlines
-            deadlines={deadlines}
+            deadlines={visibleDeadlines}
             isCourseRep={isCourseRep}
             currentUserMatric={currentUser?.matricNumber || ''}
             onToggleComplete={handleToggleDeadline}
@@ -1685,7 +1760,7 @@ export default function App() {
       case 'announcements':
         return (
           <Announcements
-            announcements={announcements}
+            announcements={visibleAnnouncements}
             isCourseRep={isCourseRep}
             onDeleteAnnouncement={handleDeleteAnnouncement}
           />
@@ -1726,9 +1801,9 @@ export default function App() {
                   return acc + count;
                 }, 0);
               })(),
-              pendingDeadlines: deadlines.filter((d) => !(d.completedBy?.[currentUser?.matricNumber || ''] ?? d.isCompleted)).length,
-              completedDeadlines: deadlines.filter((d) => (d.completedBy?.[currentUser?.matricNumber || ''] ?? d.isCompleted)).length,
-              announcementCount: announcements.length
+              pendingDeadlines: visibleDeadlines.filter((d) => !(d.completedBy?.[currentUser?.matricNumber || ''] ?? d.isCompleted)).length,
+              completedDeadlines: visibleDeadlines.filter((d) => (d.completedBy?.[currentUser?.matricNumber || ''] ?? d.isCompleted)).length,
+              announcementCount: visibleAnnouncements.length
             }}
             subStatus={subStatus}
             subscriptionDetails={subscriptionDetails}
@@ -1741,8 +1816,8 @@ export default function App() {
       case 'notifications' as any:
         return (
           <NotificationsPage
-            deadlines={deadlines}
-            announcements={announcements}
+            deadlines={visibleDeadlines}
+            announcements={visibleAnnouncements}
             activities={visibleActivities}
             onBack={() => setActiveTab('schedule')}
             onNavigateToTab={(tab) => setActiveTab(tab)}
@@ -1827,6 +1902,7 @@ export default function App() {
                 onAddDeadline={handleAddDeadline}
                 onAddAnnouncement={handleAddAnnouncement}
                 onCancel={() => setAddingOrEditing(null)}
+                departments={departments}
               />
             </motion.div>
           </AnimatePresence>

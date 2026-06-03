@@ -302,6 +302,16 @@ app.use("/uploads", express.static(uploadDir));
       await ensureVapidKeys();
       const pushSubsSnap = await getDocs(collection(db, "push-subscriptions"));
       const devicesSnap = await getDocs(collection(db, "devices"));
+      
+      // Fetch departments to segment matching matric numbers
+      let departments: any[] = [];
+      try {
+        const deptsSnap = await getDocs(collection(db, "departments"));
+        departments = deptsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log(`[Server] Loaded ${departments.length} departments for push targeting:`, departments.map(d => d.id));
+      } catch (deptErr) {
+        console.warn("[Server] Failed carrying departments list for push segment:", deptErr);
+      }
 
       const unifiedTargetsMap = new Map<string, any>();
 
@@ -363,6 +373,14 @@ app.use("/uploads", express.static(uploadDir));
           const deviceMatric = String(target.matricNumber || "").trim().toLowerCase();
           const filterMatric = String(targetValue).trim().toLowerCase();
           return deviceMatric === filterMatric;
+        }
+
+        if (targetGroup === "department" && targetValue) {
+          const dept = departments.find(d => d.id === targetValue);
+          if (!dept || !dept.prefix) return false;
+          const userNorm = String(target.matricNumber || "").toLowerCase().replace(/[\/\s\-_*]/g, "");
+          const prefixNorm = String(dept.prefix).toLowerCase().replace(/[\/\s\-_*]/g, "");
+          return prefixNorm && userNorm.startsWith(prefixNorm);
         }
 
         return true;

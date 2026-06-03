@@ -47,6 +47,7 @@ export interface Activity {
   deliveryType?: 'physical' | 'online';
   classLink?: string;
   date?: string; // e.g. "2026-06-03" (YYYY-MM-DD format)
+  departmentId?: string;
   userName?: string; // some mock utilities include userName
   action?: string; // some mock logs specify log actions
   severity?: string; // log severity levels
@@ -67,6 +68,7 @@ export interface Deadline {
   imageUrl?: string;
   imageUrls?: string[];
   completedBy?: Record<string, boolean>;
+  departmentId?: string;
 }
 
 export interface Announcement {
@@ -78,6 +80,7 @@ export interface Announcement {
   author: string; // e.g. "Course Rep" or "Dr. Adeyeri"
   imageUrl?: string;
   imageUrls?: string[];
+  departmentId?: string;
 }
 
 export interface SubscriptionRecord {

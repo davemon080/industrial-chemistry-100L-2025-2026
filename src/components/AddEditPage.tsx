@@ -83,11 +83,12 @@ interface AddEditPageProps {
   daySelected: DayOfWeek;
   currentUserMatric: string;
   initialDate?: string; // e.g. "2026-06-03" (YYYY-MM-DD)
-  onAddActivity: (activity: Omit<Activity, 'id' | 'createdBy'>) => void;
-  onUpdateActivity: (id: string, updated: Omit<Activity, 'id' | 'createdBy'>) => void;
-  onAddDeadline: (deadline: Omit<Deadline, 'id' | 'isCompleted' | 'createdBy'>) => void;
-  onAddAnnouncement: (announcement: Omit<Announcement, 'id' | 'date' | 'author'>) => void;
+  onAddActivity: (activity: Omit<Activity, 'id' | 'createdBy'> & { departmentId?: string }) => void;
+  onUpdateActivity: (id: string, updated: Omit<Activity, 'id' | 'createdBy'> & { departmentId?: string }) => void;
+  onAddDeadline: (deadline: Omit<Deadline, 'id' | 'isCompleted' | 'createdBy'> & { departmentId?: string }) => void;
+  onAddAnnouncement: (announcement: Omit<Announcement, 'id' | 'date' | 'author'> & { departmentId?: string }) => void;
   onCancel: () => void;
+  departments?: any[];
 }
 
 export default function AddEditPage({
@@ -100,9 +101,27 @@ export default function AddEditPage({
   onUpdateActivity,
   onAddDeadline,
   onAddAnnouncement,
-  onCancel
+  onCancel,
+  departments = []
 }: AddEditPageProps) {
   const isEditing = editActivity !== null;
+
+  // Track selected department
+  const [selectedDeptId, setSelectedDeptId] = useState<string>(() => {
+    if (type === 'schedule' && editActivity) {
+      return (editActivity as any).departmentId || '';
+    }
+    // Auto-match user's department by matric number pattern
+    if (currentUserMatric && departments.length > 0) {
+      const userNorm = currentUserMatric.toLowerCase().replace(/[\/\s\-_*]/g, '');
+      const matched = departments.find(dept => {
+        const deptNorm = dept.prefix.toLowerCase().replace(/[\/\s\-_*]/g, '');
+        return deptNorm && userNorm.startsWith(deptNorm);
+      });
+      if (matched) return matched.id;
+    }
+    return '';
+  });
 
   // Activity fields state
   const [actTitle, setActTitle] = useState('');
@@ -240,7 +259,8 @@ export default function AddEditPage({
         description: actDesc.trim() || undefined,
         deliveryType: actDelivery,
         classLink: actDelivery === 'online' ? actLink.trim() : undefined,
-        date: finalDate
+        date: finalDate,
+        departmentId: selectedDeptId || undefined
       };
 
       if (isEditing && editActivity) {
@@ -270,7 +290,8 @@ export default function AddEditPage({
         dueDate: dlDate,
         description: dlDesc.trim() || undefined,
         imageUrl: dlImages[0] || undefined,
-        imageUrls: dlImages.length > 0 ? dlImages : undefined
+        imageUrls: dlImages.length > 0 ? dlImages : undefined,
+        departmentId: selectedDeptId || undefined
       } as any);
 
       setSuccessMsg('Assignment deadline registered successfully!');
@@ -291,7 +312,8 @@ export default function AddEditPage({
         content: annContent.trim(),
         priority: annPriority,
         imageUrl: annImages[0] || undefined,
-        imageUrls: annImages.length > 0 ? annImages : undefined
+        imageUrls: annImages.length > 0 ? annImages : undefined,
+        departmentId: selectedDeptId || undefined
       } as any);
 
       setSuccessMsg('Announcement broadcast sent successfully!');
@@ -319,6 +341,32 @@ export default function AddEditPage({
           sub: 'Publish urgent warnings, rescheduled timetables, or course news'
         };
     }
+  };
+
+  const renderDepartmentSelector = () => {
+    if (!departments || departments.length === 0) return null;
+    return (
+      <div id="dept-select-group" className="space-y-1.5 pt-1">
+        <label className="block text-xs font-semibold text-slate-300 font-sans">
+          Restrict by Department (Optional)
+        </label>
+        <select
+          value={selectedDeptId}
+          onChange={(e) => setSelectedDeptId(e.target.value)}
+          className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-sans cursor-pointer"
+        >
+          <option value="">All Students (General Class) 🌍</option>
+          {departments.map((dept) => (
+            <option key={dept.id} value={dept.id}>
+              {dept.name} ({dept.prefix})
+            </option>
+          ))}
+        </select>
+        <p className="text-[10px] text-slate-400 font-sans font-medium italic select-none">
+          If selected, only students with matching matric prefixes can see this and receive push alerts.
+        </p>
+      </div>
+    );
   };
 
   const info = getPageTitleAndDesc();
@@ -377,6 +425,8 @@ export default function AddEditPage({
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-sans"
                 />
               </div>
+
+              {renderDepartmentSelector()}
 
               {/* Course code & category */}
               <div className="grid grid-cols-2 gap-4">
@@ -636,6 +686,8 @@ export default function AddEditPage({
                 />
               </div>
 
+              {renderDepartmentSelector()}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-sans">
@@ -752,6 +804,8 @@ export default function AddEditPage({
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-slate-100 text-sm focus:outline-none focus:border-indigo-500 transition-colors font-sans"
                 />
               </div>
+
+              {renderDepartmentSelector()}
 
               {/* Priority select */}
               <div>

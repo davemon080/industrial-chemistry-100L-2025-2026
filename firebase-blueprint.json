@@ -20,9 +20,36 @@
         "password": {
           "type": "string",
           "description": "Locked password hash or text"
+        },
+        "departmentId": {
+          "type": "string",
+          "description": "Identified matched department code string"
         }
       },
       "required": ["email", "matricNumber", "name", "password"]
+    },
+    "Department": {
+      "title": "Department",
+      "description": "Academic department configured with specified Matric number pattern mapping",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "courseRepMatric": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "name", "prefix"]
     },
     "Activity": {
       "title": "Activity",
@@ -58,6 +85,9 @@
         },
         "createdBy": {
           "type": "string"
+        },
+        "departmentId": {
+          "type": "string"
         }
       },
       "required": ["id", "title", "timeStart", "timeEnd", "day", "location", "courseCode", "category", "createdBy"]
@@ -90,6 +120,9 @@
         },
         "createdBy": {
           "type": "string"
+        },
+        "departmentId": {
+          "type": "string"
         }
       },
       "required": ["id", "title", "courseCode", "dueDate", "isCompleted", "createdBy"]
@@ -118,6 +151,9 @@
           "type": "string"
         },
         "author": {
+          "type": "string"
+        },
+        "departmentId": {
           "type": "string"
         }
       },
@@ -348,6 +384,10 @@
     "feedbacks/{feedbackId}": {
       "schema": "Feedback",
       "description": "Course and app feedback entries from students"
+    },
+    "departments/{departmentId}": {
+      "schema": "Department",
+      "description": "Academic department configurations"
     }
   }
 }
