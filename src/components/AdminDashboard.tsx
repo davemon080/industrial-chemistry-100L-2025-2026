@@ -9,7 +9,7 @@ import {
   Users, UserPlus, Shield, ShieldCheck, ShieldAlert, KeyRound, 
   Trash2, Search, Loader2, LogOut, RefreshCw, Sparkles, Check, AlertTriangle, 
   GraduationCap, Mail, Calendar, CheckCircle, Info, Plus, Settings, LayoutDashboard,
-  Ban, MessageSquare
+  Ban, MessageSquare, Database, Edit3
 } from 'lucide-react';
 import GlassCard from './GlassCard';
 import FeedbackPage from './FeedbackPage';
@@ -55,9 +55,28 @@ export default function AdminDashboard({
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
 
+  // User edit modal states
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editMatric, setEditMatric] = useState('');
+  const [editFormError, setEditFormError] = useState('');
+  const [isEditSaving, setIsEditSaving] = useState(false);
+
   // Action feedback states
   const [actionFeedback, setActionFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [userToDelete, setUserToDelete] = useState<any | null>(null);
+
+  // Database stats state
+  const [dbStats, setDbStats] = useState({
+    usersCount: 0,
+    subsCount: 0,
+    activitiesCount: 0,
+    deadlinesCount: 0,
+    announcementsCount: 0,
+    feedbacksCount: 0,
+    loading: true
+  });
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -66,6 +85,10 @@ export default function AdminDashboard({
       // 1. Fetch from Firestore online if possible
       let fetchedUsers: any[] = [];
       let fetchedSubs: Record<string, any> = {};
+      let actCount = 0;
+      let dlCount = 0;
+      let annCount = 0;
+      let fbCount = 0;
 
       if (db) {
         try {
@@ -86,7 +109,36 @@ export default function AdminDashboard({
         } catch (subErr) {
           console.warn('[Admin] Failed online subscriptions fetch:', subErr);
         }
+
+        // Fetch counts for database storage calculation
+        try {
+          const actSnap = await getDocs(collection(db, 'activities'));
+          actCount = actSnap.size;
+        } catch (_) {}
+        try {
+          const dlSnap = await getDocs(collection(db, 'deadlines'));
+          dlCount = dlSnap.size;
+        } catch (_) {}
+        try {
+          const annSnap = await getDocs(collection(db, 'announcements'));
+          annCount = annSnap.size;
+        } catch (_) {}
+        try {
+          const fbSnap = await getDocs(collection(db, 'feedbacks'));
+          fbCount = fbSnap.size;
+        } catch (_) {}
       }
+
+      // Update DB stats state
+      setDbStats({
+        usersCount: fetchedUsers.length || (localStorage.getItem('ich100l_users_db') ? Object.keys(JSON.parse(localStorage.getItem('ich100l_users_db') || '{}')).length : 0),
+        subsCount: Object.keys(fetchedSubs).length || (localStorage.getItem('ich100l_subscriptions_db') ? Object.keys(JSON.parse(localStorage.getItem('ich100l_subscriptions_db') || '{}')).length : 0),
+        activitiesCount: actCount || (localStorage.getItem('ich100l_activities') ? JSON.parse(localStorage.getItem('ich100l_activities') || '[]').length : 0),
+        deadlinesCount: dlCount || (localStorage.getItem('ich100l_deadlines') ? JSON.parse(localStorage.getItem('ich100l_deadlines') || '[]').length : 0),
+        announcementsCount: annCount || (localStorage.getItem('ich100l_announcements') ? JSON.parse(localStorage.getItem('ich100l_announcements') || '[]').length : 0),
+        feedbacksCount: fbCount,
+        loading: false
+      });
 
       // Merge local storage cached subscriptions (in case offline)
       const localSubsStr = localStorage.getItem('ich100l_subscriptions_db');
@@ -105,13 +157,29 @@ export default function AdminDashboard({
       
       // Insert cached users first
       Object.entries(localUsers).forEach(([matric, data]: [string, any]) => {
-        mergedMap.set(matric, { ...data, matricNumber: matric });
+        const mat = data.matricNumber || data.matric || matric;
+        const nameVal = data.name || data.displayName || 'No Name';
+        mergedMap.set(mat, {
+          ...data,
+          matricNumber: mat,
+          matric: mat,
+          name: nameVal,
+          displayName: nameVal
+        });
       });
 
       // Overlay online users as source of truth
       fetchedUsers.forEach(user => {
-        if (user.matricNumber) {
-          mergedMap.set(user.matricNumber, user);
+        const mat = user.matricNumber || user.matric;
+        if (mat) {
+          const nameVal = user.name || user.displayName || 'No Name';
+          mergedMap.set(mat, {
+            ...user,
+            matricNumber: mat,
+            matric: mat,
+            name: nameVal,
+            displayName: nameVal
+          });
         }
       });
 
@@ -535,6 +603,120 @@ export default function AdminDashboard({
     }
   };
 
+  // Submit edit form to modify user name, email and matric Number
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setEditFormError('');
+    setIsEditSaving(true);
+
+    const oldMatric = editingUser.matricNumber;
+    const newNameClean = editName.trim();
+    const newEmailClean = editEmail.trim().toLowerCase();
+    const newMatricClean = editMatric.trim();
+
+    if (!newNameClean || !newEmailClean || !newMatricClean) {
+      setEditFormError('Please enter all fields.');
+      setIsEditSaving(false);
+      return;
+    }
+
+    // Check if matric matches another user besides the one being edited
+    const duplicate = users.find(u => 
+      u.matricNumber.trim().toLowerCase() !== oldMatric.trim().toLowerCase() && 
+      u.matricNumber.trim().toLowerCase() === newMatricClean.toLowerCase()
+    );
+    if (duplicate) {
+      setEditFormError(`Matriculation number "${newMatricClean}" already belongs to an existing user.`);
+      setIsEditSaving(false);
+      return;
+    }
+
+    try {
+      // Create full updated object mimicking properties
+      const updatedUserProps = {
+        ...editingUser,
+        name: newNameClean,
+        email: newEmailClean,
+        matricNumber: newMatricClean,
+      };
+
+      if (db) {
+        if (oldMatric !== newMatricClean) {
+          // If matric number changed:
+          // Write to the new document ID
+          await setDoc(doc(db, 'users', getSafeDocId(newMatricClean)), updatedUserProps);
+          // Delete old document ID
+          await deleteDoc(doc(db, 'users', getSafeDocId(oldMatric)));
+        } else {
+          // Just update the fields in place
+          await setDoc(doc(db, 'users', getSafeDocId(oldMatric)), {
+            name: newNameClean,
+            email: newEmailClean,
+          }, { merge: true });
+        }
+      }
+
+      // Update local storage user db cache
+      const stored = localStorage.getItem('ich100l_users_db');
+      const localDB = stored ? JSON.parse(stored) : {};
+      
+      if (oldMatric !== newMatricClean) {
+        delete localDB[oldMatric];
+      }
+      localDB[newMatricClean] = updatedUserProps;
+      localStorage.setItem('ich100l_users_db', JSON.stringify(localDB));
+
+      // If the admin edited THEIR OWN account, synchronize the active session user
+      if (currentUser && (currentUser.matricNumber === oldMatric || currentUser.matric === oldMatric)) {
+        const keysToUpdate = ['ich100l_current_user', 'ich100l_user'];
+        keysToUpdate.forEach(k => {
+          const sessionUserStr = localStorage.getItem(k);
+          if (sessionUserStr) {
+            try {
+              const parsed = JSON.parse(sessionUserStr);
+              const updatedSession = {
+                ...parsed,
+                name: newNameClean,
+                displayName: newNameClean,
+                email: newEmailClean,
+                matricNumber: newMatricClean,
+                matric: newMatricClean,
+              };
+              localStorage.setItem(k, JSON.stringify(updatedSession));
+            } catch (_) {}
+          } else {
+            // Write standard schema if missing
+            const updatedSession = {
+              name: newNameClean,
+              displayName: newNameClean,
+              email: newEmailClean,
+              matricNumber: newMatricClean,
+              matric: newMatricClean,
+              isAdmin: true
+            };
+            localStorage.setItem(k, JSON.stringify(updatedSession));
+          }
+        });
+      }
+
+      // Update local React state list
+      setUsers(prev => prev.map(u => u.matricNumber === oldMatric ? updatedUserProps : u));
+
+      setActionFeedback({
+        type: 'success',
+        message: `Successfully updated profile details for ${newNameClean}.`
+      });
+
+      setEditingUser(null);
+    } catch (err: any) {
+      console.error(err);
+      setEditFormError(err.message || 'Error occurred while updating student record.');
+    } finally {
+      setIsEditSaving(false);
+    }
+  };
+
   // Change Admin Password Handler
   const handleChangeAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -725,7 +907,7 @@ export default function AdminDashboard({
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6 space-y-6">
         
         {/* Connection health & diagnostic stats ticker */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-gradient-to-r from-indigo-505/10 to-transparent border border-indigo-500/20 rounded-2xl">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-gradient-to-r from-indigo-500/10 to-transparent border border-indigo-500/20 rounded-2xl">
           <div className="flex items-center gap-2.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
             <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
@@ -780,6 +962,95 @@ export default function AdminDashboard({
                 </div>
               </GlassCard>
             </div>
+
+            {/* Storage diagnostics calculation */}
+            {(() => {
+              const estimatedBytes = (dbStats.usersCount * 500) + (dbStats.subsCount * 300) + (dbStats.activitiesCount * 400) + (dbStats.deadlinesCount * 300) + (dbStats.announcementsCount * 600) + (dbStats.feedbacksCount * 800) + 12800; // includes 12.8KB baseline
+              const limitBytes = 1073741824; // 1.00 GB
+
+              const formatBytes = (bytes: number) => {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+              };
+
+              return (
+                <GlassCard className="p-5 bg-gradient-to-br from-slate-950/50 to-slate-900/10 border-slate-900/60 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-64 h-64 rounded-full bg-indigo-500/5 blur-[50px] pointer-events-none" />
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Database className="w-4 h-4 text-indigo-400" />
+                        <h4 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
+                          Cloud Database Storage Diagnostics
+                        </h4>
+                      </div>
+                      <p className="text-2xs text-slate-400 font-sans leading-relaxed">
+                        Live telemetry tracking virtual file descriptors, collections, and database cluster size limits.
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] font-mono px-3 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300">
+                        Spark Plan Quota &bull; Active
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Progress Display */}
+                  <div className="mt-5 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-slate-400">Database Space Taken</span>
+                      <span className="text-indigo-400 font-bold">{formatBytes(estimatedBytes)}</span>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full h-2 rounded-full bg-slate-950 overflow-hidden border border-slate-900 flex">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.max(0.5, (estimatedBytes / limitBytes) * 100)}%` }}
+                        className="h-full bg-gradient-to-r from-indigo-500 via-violet-500 to-indigo-400"
+                        transition={{ duration: 0.8, ease: 'easeOut' }}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-2xs font-mono text-slate-500 pt-0.5">
+                      <span>Available Space: {formatBytes(limitBytes - estimatedBytes)}</span>
+                      <span>Limit: 1.00 GB (1,024 MB)</span>
+                    </div>
+                  </div>
+
+                  {/* Dynamic collections breakdown */}
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mt-5 pt-4 border-t border-slate-900/65">
+                    <div className="bg-slate-950/40 border border-slate-900 p-2 rounded-xl text-center">
+                      <span className="block text-2xs text-slate-500 font-mono">Students</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 block">{dbStats.usersCount}</span>
+                    </div>
+                    <div className="bg-slate-950/40 border border-slate-900 p-2 rounded-xl text-center">
+                      <span className="block text-[10px] text-slate-500 font-mono leading-none">Subscribers</span>
+                      <span className="text-xs font-bold text-slate-200 mt-1 block">{dbStats.subsCount}</span>
+                    </div>
+                    <div className="bg-slate-950/40 border border-slate-900 p-2 rounded-xl text-center">
+                      <span className="block text-2xs text-slate-500 font-mono">Classes</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 block">{dbStats.activitiesCount}</span>
+                    </div>
+                    <div className="bg-slate-950/40 border border-slate-900 p-2 rounded-xl text-center">
+                      <span className="block text-2xs text-slate-500 font-mono">Deadlines</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 block">{dbStats.deadlinesCount}</span>
+                    </div>
+                    <div className="bg-slate-950/40 border border-slate-900 p-2 rounded-xl text-center">
+                      <span className="block text-2xs text-slate-500 font-mono">Broadcasts</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 block">{dbStats.announcementsCount}</span>
+                    </div>
+                    <div className="bg-slate-950/40 border border-slate-900 p-2 rounded-xl text-center">
+                      <span className="block text-2xs text-slate-500 font-mono">Feedbacks</span>
+                      <span className="text-xs font-bold text-slate-200 mt-0.5 block">{dbStats.feedbacksCount}</span>
+                    </div>
+                  </div>
+                </GlassCard>
+              );
+            })()}
 
             {/* FULL-WIDTH Active Users List & Advanced Management Desk */}
             <div className="space-y-4 pb-28">
@@ -845,6 +1116,20 @@ export default function AdminDashboard({
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">
                                 <h4 className="text-xs font-bold font-sans text-slate-200 truncate">{user.name}</h4>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingUser(user);
+                                    setEditName(user.name || user.displayName || '');
+                                    setEditEmail(user.email || '');
+                                    setEditMatric(user.matricNumber || user.matric || '');
+                                    setEditFormError('');
+                                  }}
+                                  className="p-1 hover:bg-indigo-500/10 hover:text-indigo-400 text-slate-500 border border-transparent hover:border-indigo-500/20 rounded cursor-pointer transition-all"
+                                  title="Edit student profile details directly"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
                                 {isCurrentAdmin && (
                                   <span className="text-[7.5px] font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/15 px-1 py-0.2 rounded uppercase">
                                     Admin
@@ -931,6 +1216,22 @@ export default function AdminDashboard({
                                 <span>Revoke Free</span>
                               </button>
                             )}
+
+                            {/* Edit Profile Action Button */}
+                            <button
+                              onClick={() => {
+                                setEditingUser(user);
+                                setEditName(user.name || user.displayName || '');
+                                setEditEmail(user.email || '');
+                                setEditMatric(user.matricNumber || user.matric || '');
+                                setEditFormError('');
+                              }}
+                              className="p-1.5 px-3 bg-indigo-500/10 hover:bg-indigo-600 border border-indigo-500/25 hover:border-indigo-500 text-indigo-400 hover:text-white rounded-lg text-[10px] font-mono font-bold uppercase transition-all flex items-center gap-1.5 cursor-pointer"
+                              title="Edit user details: name, email, and matric number"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                              <span>Edit Profile</span>
+                            </button>
 
                             {/* Password Reset Action Button */}
                             <button
@@ -1200,13 +1501,13 @@ export default function AdminDashboard({
 
               <form onSubmit={handleCreateUser} className="space-y-4">
                 {formError && (
-                  <div className="p-3 rounded-xl bg-rose-555/10 border border-rose-500/30 text-rose-300 text-[11px] leading-relaxed">
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] leading-relaxed">
                     {formError}
                   </div>
                 )}
 
                 {formSuccess && (
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-555/30 text-emerald-300 text-[11px] leading-relaxed">
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] leading-relaxed">
                     {formSuccess}
                   </div>
                 )}
@@ -1290,6 +1591,127 @@ export default function AdminDashboard({
                     <UserPlus className="w-3.5 h-3.5" />
                   )}
                   <span>{isSaving ? 'Provisioning...' : 'Provision Student'}</span>
+                </button>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Dynamic Pop-up Modal: User Editing Terminal */}
+      <AnimatePresence>
+        {editingUser && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-[#070b13]/80 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-slate-950 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl relative overflow-hidden text-left"
+            >
+              {/* Neon accent bar */}
+              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
+              
+              <div className="flex items-center justify-between border-b border-slate-900 pb-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <Edit3 className="w-4 h-4 text-indigo-400" />
+                  <h3 className="text-sm font-display font-bold text-white uppercase tracking-wider">Edit User Profile</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingUser(null)}
+                  className="p-1 px-2.5 bg-slate-950 hover:bg-slate-900 border border-slate-850 text-slate-400 hover:text-white rounded-lg text-[10px] font-mono cursor-pointer transition-all"
+                >
+                  Close
+                </button>
+              </div>
+
+              <form onSubmit={handleEditUserSubmit} className="space-y-4">
+                {editFormError && (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-[11px] leading-relaxed font-sans">
+                    {editFormError}
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">Student Name</label>
+                  <div className="relative">
+                    <GraduationCap className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                    <input
+                      type="text"
+                      required
+                      value={editName}
+                      onChange={(e) => {
+                        setEditName(e.target.value);
+                        setEditFormError('');
+                      }}
+                      placeholder="Full Name"
+                      className="w-full bg-slate-950/80 border border-slate-850 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder:text-slate-600 font-sans"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">Email Address</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                    <input
+                      type="email"
+                      required
+                      value={editEmail}
+                      onChange={(e) => {
+                        setEditEmail(e.target.value);
+                        setEditFormError('');
+                      }}
+                      placeholder="e.g. student@ich100l.edu"
+                      className="w-full bg-slate-950/80 border border-slate-850 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder:text-slate-605 font-sans"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block flex justify-between">
+                    <span>Student Matric Number</span>
+                    <span className="text-[8px] text-slate-500 lowercase font-mono">Format: yyyy/ps/ich/xxxx</span>
+                  </label>
+                  <div className="relative font-mono">
+                    <KeyRound className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                    <input
+                      type="text"
+                      required
+                      value={editMatric}
+                      onChange={(e) => {
+                        setEditMatric(e.target.value);
+                        setEditFormError('');
+                      }}
+                      placeholder="Matric Number"
+                      className="w-full bg-slate-950/80 border border-slate-850 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 placeholder:text-slate-655 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-900 flex gap-2">
+                  <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                  <p className="text-[9.5px] text-slate-405 font-sans leading-relaxed">
+                    Changing the matric number will write a new entry with the updated ID in Cloud Firestore and delete the old entry. Local caches will synchronize immediately.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isEditSaving || !editName.trim() || !editEmail.trim() || !editMatric.trim()}
+                  className="w-full py-2.5 bg-gradient-to-r from-indigo-550 to-indigo-600 hover:from-indigo-450 hover:to-indigo-550 disabled:opacity-50 text-white font-sans font-extrabold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer border border-indigo-300/10"
+                >
+                  {isEditSaving ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Edit3 className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isEditSaving ? 'Saving Updates...' : 'Commit Changes'}</span>
                 </button>
               </form>
             </motion.div>

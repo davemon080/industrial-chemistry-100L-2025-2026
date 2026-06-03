@@ -734,11 +734,34 @@ export default function App() {
     const unsubscribeSession = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        if (data && data.activeSessionId && data.activeSessionId !== deviceSessionId) {
-          console.warn('[Session] Session conflict detected. Another device signed in. Logging out...');
-          alert('This student account has been signed in on a different device. You have been automatically logged out.');
-          setCurrentUser(null);
-          localStorage.removeItem('ich100l_user');
+        if (data) {
+          // 1. Session conflict check
+          if (data.activeSessionId && data.activeSessionId !== deviceSessionId) {
+            console.warn('[Session] Session conflict detected. Another device signed in. Logging out...');
+            alert('This student account has been signed in on a different device. You have been automatically logged out.');
+            setCurrentUser(null);
+            localStorage.removeItem('ich100l_user');
+            return;
+          }
+
+          // 2. Real-time Role level updates (isCourseRep, isAdmin, profile changes)
+          const isCourseRepChanged = (currentUser.isCourseRep || false) !== (data.isCourseRep || false);
+          const isAdminChanged = (currentUser.isAdmin || false) !== (data.isAdmin || false);
+          const nameChanged = currentUser.name !== data.name;
+          const emailChanged = currentUser.email !== data.email;
+
+          if (isCourseRepChanged || isAdminChanged || nameChanged || emailChanged) {
+            console.log('[Session] Real-time role or profile update received from Firestore, syncing state...');
+            const updatedUser = {
+              ...currentUser,
+              name: data.name || currentUser.name,
+              email: data.email || currentUser.email,
+              isCourseRep: data.isCourseRep || false,
+              isAdmin: data.isAdmin || false
+            };
+            setCurrentUser(updatedUser);
+            localStorage.setItem('ich100l_user', JSON.stringify(updatedUser));
+          }
         }
       }
     }, (error) => {
